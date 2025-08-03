@@ -1,0 +1,4 @@
+/* Make sure this file is imported in your Next.js project and processed by Tailwind CSS/PostCSS */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
