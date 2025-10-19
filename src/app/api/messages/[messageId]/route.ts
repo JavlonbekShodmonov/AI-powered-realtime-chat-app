@@ -33,7 +33,7 @@ export async function PATCH(
 
   await messagesCollection.updateOne(
     { _id: new ObjectId(params.id) },
-    { $set: { text, editedAt: new Date() } }
+    { $set: { content: text, editedAt: new Date() } }
   );
 
   return NextResponse.json({ message: "message updated" });

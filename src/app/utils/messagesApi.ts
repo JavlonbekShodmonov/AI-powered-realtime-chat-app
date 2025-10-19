@@ -17,9 +17,11 @@ export async function getMessages(roomId: string) {
 export async function sendMessage({
   roomId,
   text,
+  senderId
 }: {
   roomId: string;
   text: string;
+  senderId: string;
 }) {
   const res = await fetch("/api/messages", {
     method: "POST",

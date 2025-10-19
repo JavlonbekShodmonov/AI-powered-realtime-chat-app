@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import Header from "./components/header";
+import { SocketProvider } from "./providers/SocketProvider";
 
 export const metadata: Metadata = {
   title: "Clerk Next.js Quickstart",
@@ -17,8 +18,10 @@ export default function RootLayout({
     <ClerkProvider>
       <html lang="en">
         <body className="">
+          <SocketProvider>
           <Header />
           {children}
+          </SocketProvider>
         </body>
       </html>
     </ClerkProvider>

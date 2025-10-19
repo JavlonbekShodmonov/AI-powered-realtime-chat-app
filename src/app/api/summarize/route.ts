@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 
+
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_KEY });
 
 export async function POST(req: NextRequest) {
@@ -12,7 +13,7 @@ export async function POST(req: NextRequest) {
       contents: [
         {
           role: "user",
-          parts: [{ text: `Summarize the following conversation:\n\n${text}` }],
+          parts: [{ text: `Summarize the following conversation in the same language as concisely as possible without leaving any important information:\n\n${text}` }],
         },
       ],
     });

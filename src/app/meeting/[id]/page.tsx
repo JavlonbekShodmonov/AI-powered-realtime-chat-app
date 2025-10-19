@@ -1,17 +1,36 @@
-import dynamic from "next/dynamic";
+"use client";
 
-// Dynamically import Chat component to avoid hydration errors
-const Chat = dynamic(() => import("./Chat"), { ssr: false });
+import React, { useEffect, useState } from "react";
+import { canEnterRoom } from "@/app/utils/roomApi";
+import Chat from "./Chat";
 
 export default function MeetingPage({ params }: { params: { id: string } }) {
-  const roomId = params.id; // ✅ Use this instead of useParams()
+  const appointmentId = params.id;
+  const [status, setStatus] = useState<{ allowed: boolean; reason?: string }>({
+    allowed: false,
+  });
 
-  return (
-    <main className="max-w-2xl mx-auto pt-12">
-      <h1 className="text-2xl font-bold text-center mb-4">
-        Meeting Room: {roomId}
-      </h1>
-      <Chat roomId={roomId} />
-    </main>
-  );
+  useEffect(() => {
+    async function check() {
+      const res = await canEnterRoom(appointmentId);
+      setStatus(res);
+    }
+    check();
+
+    // poll every 2s until allowed
+    const interval = setInterval(check, 2000);
+    return () => clearInterval(interval);
+  }, [appointmentId]);
+
+  if (!status.allowed) {
+    return (
+      <div className="p-4 text-red-500">
+        ❌ Access denied — {status.reason || "user is not online"}
+      </div>
+    );
+  }
+
+  return <div className="p-4">✅ Welcome to room {appointmentId}
+  <Chat roomId={appointmentId} />
+  </div>;
 }
