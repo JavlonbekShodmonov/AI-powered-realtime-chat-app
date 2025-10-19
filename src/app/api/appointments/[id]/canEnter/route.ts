@@ -78,66 +78,61 @@ export async function GET(
       );
     }
 
-    // 6. Check presence on port 3001 via HTTP
-    try {
-      const invitedUsers: string[] = appointment.withUserId || [];
-      
-      console.log('🔍 Checking presence for users:', invitedUsers);
-      
-      const socketUrl = process.env.SOCKET_SERVER_URL || 'http://localhost:3001';
+   // 6. Check presence on port 3001 via HTTP
+try {
+  const invitedUsers: string[] = appointment.withUserId || [];
+  console.log('🔍 Checking presence for users:', invitedUsers);
+  
+  const socketUrl = process.env.SOCKET_SERVER_URL || 'http://localhost:3001';
 
-      const presenceChecks = await Promise.all(
-        invitedUsers.map(async (uid) => {
-          try {
-            const presenceUrl = `${socketUrl}/api/presence/${uid}`;
-            console.log(`📡 Fetching: ${presenceUrl}`);
-            
-            const res = await fetch(presenceUrl, {
-              cache: 'no-store',
-              signal: AbortSignal.timeout(3000),
-            });
-            
-            console.log(`📡 Response for ${uid}: ${res.status}`);
-            
-            if (!res.ok) {
-              const errorText = await res.text();
-              console.warn(`❌ Presence check failed for ${uid}: HTTP ${res.status} - ${errorText}`);
-              return { uid, online: false };
-            }
-            
-            const data = await res.json();
-            console.log(`📊 User ${uid}: ${JSON.stringify(data)}`);
-            
-            return { uid, online: data.online === true };
-          } catch (error) {
-            console.error(`❌ Error checking ${uid}:`, error);
-            return { uid, online: false };
-          }
-        })
-      );
+  const presenceChecks = await Promise.all(
+    invitedUsers.map(async (uid) => {
+      try {
+        const res = await fetch(`${socketUrl}/api/presence/${uid}`, {
+          method: 'GET',           // explicitly GET
+          cache: 'no-store',
+          credentials: 'include',  // send Clerk session if required
+          signal: AbortSignal.timeout(3000),
+        });
 
-      const offlineUsers = presenceChecks.filter(p => !p.online);
-      
-      if (offlineUsers.length > 0) {
-        console.warn('❌ Offline users:', offlineUsers.map(u => u.uid));
-        return NextResponse.json(
-          {
-            allowed: false,
-            reason: `Waiting for ${offlineUsers.length} user(s) to come online`,
-            offlineUsers: offlineUsers.map(u => u.uid),
-          },
-          { status: 200 }
-        );
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.warn(`❌ Presence check failed for ${uid}: HTTP ${res.status} - ${errorText}`);
+          return { uid, online: false };
+        }
+
+        const data = await res.json();
+        console.log(`📊 User ${uid}: ${JSON.stringify(data)}`);
+        return { uid, online: data.online === true };
+      } catch (err) {
+        console.error(`❌ Error checking presence for ${uid}:`, err);
+        return { uid, online: false };
       }
-      
-      console.log('✅ All users are online!');
-    } catch (err) {
-      console.error("❌ Presence check system error:", err);
-      return NextResponse.json(
-        { allowed: false, reason: "Presence check failed" },
-        { status: 500 }
-      );
-    }
+    })
+  );
+
+  const offlineUsers = presenceChecks.filter(p => !p.online);
+  if (offlineUsers.length > 0) {
+    console.warn('❌ Offline users:', offlineUsers.map(u => u.uid));
+    return NextResponse.json(
+      {
+        allowed: false,
+        reason: `Waiting for ${offlineUsers.length} user(s) to come online`,
+        offlineUsers: offlineUsers.map(u => u.uid),
+      },
+      { status: 200 }
+    );
+  }
+
+  console.log('✅ All users are online!');
+} catch (err) {
+  console.error("❌ Presence check system error:", err);
+  return NextResponse.json(
+    { allowed: false, reason: "Presence check failed" },
+    { status: 500 }
+  );
+}
+
 
     // 7. Success
     return NextResponse.json(
