@@ -2,6 +2,8 @@
 
 import { useSearchParams } from "next/navigation";
 
+export const dynamic = "force-dynamic";
+
 export default function NotAllowedPage() {
   const searchParams = useSearchParams();
   const reason = searchParams?.get("reason") || "Access denied";
