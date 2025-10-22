@@ -49,7 +49,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
     console.log("🔵 Connecting with user:", user.id, user.fullName);
 
-    const socket = io({
+    const socket = io(process.env.SOCKET_SERVER_URL,{
       path: "/api/socket",
       auth: {
         userId: user.id,
