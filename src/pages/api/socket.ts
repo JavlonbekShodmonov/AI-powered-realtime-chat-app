@@ -68,7 +68,10 @@ export default function handler(
     const httpServer: HTTPServer = res.socket.server as any;
     const io = new IOServer(httpServer, {
       path: "/api/socket",
-      cors: { origin: ["http://localhost:3000"], credentials: true },
+      cors: {
+        origin: ["http://localhost:3000", "https://shadmanov.onrender.com"],
+        credentials: true,
+      },
     });
 
     res.socket.server.io = io;
