@@ -83,7 +83,8 @@ try {
   const invitedUsers: string[] = appointment.withUserId || [];
   console.log('🔍 Checking presence for users:', invitedUsers);
   
-  const socketUrl = process.env.SOCKET_SERVER_URL || 'http://localhost:3001';
+const socketUrl =
+  process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || 'http://localhost:3001';
 
   const presenceChecks = await Promise.all(
     invitedUsers.map(async (uid) => {
