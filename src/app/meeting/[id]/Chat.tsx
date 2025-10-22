@@ -337,7 +337,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
         </div>
 
         {/* Right column: Summarize button (on mobile it stacks below) */}
-        <div className="mt-6 lg:mt-0 lg:ml-4 flex flex-col items-center">
+        <div className="mt-6 lg:mt-0 lg:ml-4 flex flex-col items-center justify-center">
           <button
             className="border-2 border-black pr-4 pl-4 rounded-full mt-4 text-center uppercase text-xl font-semibold"
             onClick={handleSummarize}

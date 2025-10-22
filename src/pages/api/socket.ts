@@ -10,7 +10,7 @@ import {
 } from "@/lib/message.controller";
 import { clerkClient } from "@clerk/nextjs/server";
 
-const userSocketMap: Record<string, string[]> = {};
+export const userSocketMap: Record<string, string[]> = {};
 export const onlineUsers = new Map<string, string>();
 
 function groupMessagesByDate(messages: any[]) {
@@ -100,7 +100,7 @@ export default function handler(
           // 🔑 FIX: Populate sender info for initial messages
           const msgs = await getMessages({ roomId, page: 1, limit: 50 });
           const populatedMsgs = await populateMessageSenders(msgs);
-          
+
           socket.emit("initialMessages", groupMessagesByDate(populatedMsgs));
 
           io.to(roomId).emit(
@@ -146,7 +146,7 @@ export default function handler(
             senderId: data.senderId,
             text: data.newContent,
           });
-          
+
           // 🔑 FIX: Populate sender info for edited message
           const populated = await populateMessageSenders([updated]);
           io.to(data.roomId).emit("messageEdited", populated[0]);
