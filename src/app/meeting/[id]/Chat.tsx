@@ -44,92 +44,42 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   }, [messages]);
 
   // --- Setup socket connection ---
-  useEffect(() => {
-    if (!isLoaded || !user) return;
+  // In your Chat.tsx, replace the socket connection code with:
 
-    console.log("🔵 Connecting with user:", user.id, user.fullName);
+useEffect(() => {
+  if (!isLoaded || !user) return;
 
-    const socket = io(process.env.NEXT_PUBLIC_SOCKET_SERVER_URL ||"",{
-      path: "/api/socket",
-      auth: {
-        userId: user.id,
-        userName: user.fullName || user.firstName || "Anonymous",
-      },
+  console.log("🔵 Connecting with user:", user.id, user.fullName);
+
+  // ✅ FIXED: Don't use custom path for standalone socket server
+  const socket = io(process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001", {
+    auth: {
+      userId: user.id,
+      userName: user.fullName || user.firstName || "Anonymous",
+    },
+    transports: ["websocket", "polling"], // Add polling fallback
+    reconnection: true,
+  });
+
+  socketRef.current = socket;
+
+  socket.on("connect", () => {
+    console.log("✅ Socket connected, identifying user:", user.id);
+    socket.emit("identify", {
+      userId: user.id,
+      userName: user.fullName || user.firstName || "Anonymous",
     });
 
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      console.log("✅ Socket connected, identifying user:", user.id);
-      socket.emit("identify", {
-        userId: user.id,
-        userName: user.fullName || user.firstName || "Anonymous",
-      });
-
-      // Join room after identifying
-      socket.emit("joinRoom", {
-        roomId,
-        userId: user.id,
-        userName: user.fullName || user.firstName || "Anonymous",
-      });
+    // Join room after identifying
+    socket.emit("joinRoom", {
+      roomId,
+      userId: user.id,
+      userName: user.fullName || user.firstName || "Anonymous",
     });
+  });
 
-    socket.on("roomUsers", (users: string[]) => {
-      console.log("📋 Room users:", users);
-      setRoomUsers(users);
-    });
-
-    socket.on("initialMessages", (grouped: Record<string, any[]>) => {
-      const flat = Object.values(grouped).flat();
-      console.log("📨 Initial messages loaded:", flat.length);
-      setMessages(flat);
-      // ensure scroll to bottom on initial load
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
-    });
-
-    socket.on("user-joined", ({ userId }) => {
-      console.log(`${userId} joined the room`);
-    });
-
-    socket.on("newMessage", (message) => {
-      console.log("📩 New message received:", message);
-      const normalized = {
-        ...message,
-        _id: message._id?.toString?.() || String(message._id),
-      };
-      setMessages((prev) => {
-        if (prev.some((m) => m._id === normalized._id)) return prev;
-        return [...prev, normalized];
-      });
-    });
-
-    socket.on("onlineUsersWithNames", (list) => {
-      console.log("👥 Online users:", list);
-      setOnlineUsers(list);
-    });
-
-    socket.on("messageEdited", (updated) => {
-      setMessages((prev) =>
-        prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m))
-      );
-    });
-
-    socket.on("messageDeleted", (messageId: string) => {
-      setMessages((prev) =>
-        prev.filter((msg) => msg._id !== messageId && msg.id !== messageId)
-      );
-    });
-
-    socket.on("user-left", () => {
-      alert("The other user has left the chat");
-    });
-
-    return () => {
-      console.log("🔴 Disconnecting socket");
-      socket.disconnect();
-      socketRef.current = null;
-    };
-  }, [isLoaded, user, roomId]);
+  // ... rest of your socket event handlers
+}, [isLoaded, user, roomId]);
 
   const handleExit = () => {
     if (socketRef.current) {

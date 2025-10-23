@@ -13,22 +13,39 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user?.id) return;
     console.log("SocketProvider - Clerk userId:", user?.id);
-    // connect once, and keep alive while the app is open
-    const s = io("http://localhost:3001", {
+    
+    // ✅ CRITICAL FIX: Use environment variable with fallback
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
+    
+    console.log("🔌 Connecting to socket server:", socketUrl);
+    
+    const s = io(socketUrl, {
       auth: { userId: user.id },
-      transports: ["websocket"],
+      transports: ["websocket", "polling"], // ✅ Add polling as fallback
+      reconnection: true,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
+    });
+
+    s.on("connect", () => {
+      console.log("✅ Socket connected successfully");
+    });
+
+    s.on("connect_error", (error) => {
+      console.error("❌ Socket connection error:", error);
     });
 
     setSocket(s);
 
     return () => {
+      console.log("🔴 Disconnecting socket");
       s.disconnect();
     };
   }, [user?.id]);
 
   return (
     <SocketContext.Provider value={socket}>
-        {children}
+      {children}
     </SocketContext.Provider>
   );
 }
