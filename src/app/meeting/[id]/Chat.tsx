@@ -17,40 +17,38 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   const [newMessage, setNewMessage] = useState("");
   const [summary, setSummary] = useState("");
   const [loadingSummary, setLoadingSummary] = useState(false);
-  const socketRef = useRef<Socket | null>(null);
   const [roomUsers, setRoomUsers] = useState<string[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string }[]>(
     []
   );
+  const socketRef = useRef<Socket | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // --- Auto-scroll behaviour:
-  // If user is near the bottom when new messages arrive, scroll to bottom.
-  // If they are reading older messages (scrolled up), do not yank them.
+  // --- Auto-scroll if near bottom when messages update ---
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
-
-    // If user is within 100px of bottom, auto-scroll.
     if (distanceFromBottom < 100) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-    // else leave their scroll position alone
   }, [messages]);
 
-  // --- Setup socket connection ---
+  // --- Socket setup ---
   useEffect(() => {
     if (!isLoaded || !user) return;
+    if (socketRef.current) return;
 
-    console.log("🔵 Connecting with user:", user.id, user.fullName);
+    const base =
+      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
 
-    const socket = io(process.env.NEXT_PUBLIC_SOCKET_SERVER_URL ||"",{
-      path: "/api/socket",
+    const socket = io(base, {
+      path: "/socket.io",
+      transports: ["websocket"],
       auth: {
         userId: user.id,
         userName: user.fullName || user.firstName || "Anonymous",
@@ -60,13 +58,10 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     socketRef.current = socket;
 
     socket.on("connect", () => {
-      console.log("✅ Socket connected, identifying user:", user.id);
       socket.emit("identify", {
         userId: user.id,
         userName: user.fullName || user.firstName || "Anonymous",
       });
-
-      // Join room after identifying
       socket.emit("joinRoom", {
         roomId,
         userId: user.id,
@@ -74,39 +69,30 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       });
     });
 
-    socket.on("roomUsers", (users: string[]) => {
-      console.log("📋 Room users:", users);
-      setRoomUsers(users);
-    });
+    socket.on("roomUsers", (users: string[]) => setRoomUsers(users));
 
     socket.on("initialMessages", (grouped: Record<string, any[]>) => {
       const flat = Object.values(grouped).flat();
-      console.log("📨 Initial messages loaded:", flat.length);
       setMessages(flat);
-      // ensure scroll to bottom on initial load
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
-    });
-
-    socket.on("user-joined", ({ userId }) => {
-      console.log(`${userId} joined the room`);
+      setTimeout(
+        () => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }),
+        50
+      );
     });
 
     socket.on("newMessage", (message) => {
-      console.log("📩 New message received:", message);
       const normalized = {
         ...message,
         _id: message._id?.toString?.() || String(message._id),
       };
-      setMessages((prev) => {
-        if (prev.some((m) => m._id === normalized._id)) return prev;
-        return [...prev, normalized];
-      });
+      setMessages((prev) =>
+        prev.some((m) => m._id === normalized._id)
+          ? prev
+          : [...prev, normalized]
+      );
     });
 
-    socket.on("onlineUsersWithNames", (list) => {
-      console.log("👥 Online users:", list);
-      setOnlineUsers(list);
-    });
+    socket.on("onlineUsersWithNames", (list) => setOnlineUsers(list));
 
     socket.on("messageEdited", (updated) => {
       setMessages((prev) =>
@@ -114,27 +100,47 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       );
     });
 
-    socket.on("messageDeleted", (messageId: string) => {
-      setMessages((prev) =>
-        prev.filter((msg) => msg._id !== messageId && msg.id !== messageId)
-      );
+    socket.on("messageDeleted", (id: string) => {
+      setMessages((prev) => prev.filter((m) => m._id !== id && m.id !== id));
     });
 
-    socket.on("user-left", () => {
-      alert("The other user has left the chat");
-    });
+    socket.on("user-left", () => alert("The other user has left the chat"));
 
     return () => {
-      console.log("🔴 Disconnecting socket");
-      socket.disconnect();
-      socketRef.current = null;
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
     };
   }, [isLoaded, user, roomId]);
+
+  // --- Online user updates ---
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    socket.on("getOnlineUsers", (users) => setOnlineUsers(users));
+    socket.on("user:online", (user) =>
+      setOnlineUsers((prev) =>
+        prev.some((u) => u.id === user.id) ? prev : [...prev, user]
+      )
+    );
+    socket.on("user:offline", (id) =>
+      setOnlineUsers((prev) => prev.filter((u) => u.id !== id))
+    );
+
+    return () => {
+      socket.off("getOnlineUsers");
+      socket.off("user:online");
+      socket.off("user:offline");
+    };
+  }, [socketRef.current]);
 
   const handleExit = () => {
     if (socketRef.current) {
       socketRef.current.emit("leaveMeeting", { meetingId: roomId });
       socketRef.current.disconnect();
+      socketRef.current = null;
     }
     router.push("/schedule");
   };
@@ -142,7 +148,6 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   const handleSend = () => {
     if (!newMessage.trim() || !socketRef.current || !user) return;
 
-    console.log("📤 Sending message from:", user.id);
     socketRef.current.emit("sendMessage", {
       roomId,
       senderId: user.id,
@@ -170,32 +175,6 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     );
   };
 
-  // keep listening for server edit events (already wired above but this ensures local listeners too)
-  useEffect(() => {
-    if (!socketRef.current) return;
-
-    const handleEdited = (updated: any) => {
-      setMessages((prev) =>
-        prev.map((m) => (m._id === updated._id ? updated : m))
-      );
-    };
-
-    const handleEditError = (err: any) => {
-      console.error("⚠️ editMessageError received:", err?.message || err);
-      alert(`Failed to edit message: ${err?.message || "Unknown error"}`);
-    };
-
-    socketRef.current.on("messageEdited", handleEdited);
-    socketRef.current.on("editMessageError", handleEditError);
-
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.off("messageEdited", handleEdited);
-        socketRef.current.off("editMessageError", handleEditError);
-      }
-    };
-  }, []);
-
   const handleDelete = (id: string) => {
     if (!confirm("Delete this message?") || !socketRef.current) return;
 
@@ -218,8 +197,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       });
       const data = await res.json();
       setSummary(data.summary || "No summary available.");
-    } catch (error) {
-      console.error("Error summarizing chat:", error);
+    } catch {
       setSummary("Failed to summarize chat.");
     } finally {
       setLoadingSummary(false);
@@ -235,121 +213,132 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   }
 
   return (
-    <div className="block font-sans text-center font-light">
-      <main className="flex flex-col lg:flex-row justify-center items-start lg:items-center">
-        {/* Left column: exit */}
-        <div className="flex flex-col space-y-8 mb-6 lg:mb-96 lg:mr-4">
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-indigo-50 to-slate-100 flex justify-center items-center font-sans text-gray-800">
+      <main className="flex flex-col lg:flex-row justify-center items-center lg:items-center gap-8 p-8 w-full max-w-7xl">
+
+        {/* LEFT COLUMN */}
+        <div className="flex flex-col items-center space-y-6 border-4 border-black rounded-3xl p-6 bg-white/80 shadow-xl backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <button
-            className="border-2 rounded-3xl hover:bg-black hover:text-white border-black pl-4 pr-4 pt-2 pb-2"
             onClick={handleExit}
+            className="px-6 py-3 border-2 border-indigo-500 text-indigo-600 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all duration-300 font-semibold shadow-sm"
           >
-            exit
+            Exit
           </button>
         </div>
 
-        {/* Main chat area. On mobile it becomes taller (vertical) and width is near-full */}
-        <div className="w-full lg:w-[70%] relative bg-white border-2 border-black rounded-2xl mt-4 flex justify-center">
-          <div className="w-[95%] md:w-[90%] lg:w-[85%] m-4 rounded-3xl border-2 border-black p-4 flex flex-col"
-               style={{ minHeight: "72vh" }}>
-            {/* online users */}
-            <div className="online-users flex gap-2 items-start text-sm text-black mb-2 flex-wrap">
-              {onlineUsers.length === 0 ? (
-                <span>No one online</span>
-              ) : (
-                onlineUsers.map((u) => (
-                  <span key={u.id} className="px-2 py-1 bg-green-100 rounded">
-                    {u.name}
-                  </span>
-                ))
-              )}
-            </div>
+        {/* MIDDLE CHAT COLUMN */}
+        <div className="flex-1 relative border-4 border-black bg-white/90 backdrop-blur-md rounded-3xl shadow-2xl p-6 w-full max-w-3xl transition-all duration-300 hover:shadow-indigo-200">
 
-            {/* messages container */}
-            <div
-              ref={containerRef}
-              className="flex-1 space-y-4 overflow-y-auto mb-4"
-              // allow long messages to wrap and not overflow
-              style={{ wordBreak: "break-word" }}
-            >
-              {messages.map((msg) => (
-                <div
-                  key={msg._id}
-                  className="p-3 border rounded shadow-sm flex items-stretch justify-between w-full text-start"
+          {/* Online Users */}
+          <div className="flex flex-wrap gap-2 mb-3 text-sm font-medium">
+            {onlineUsers.length === 0 ? (
+              <span className="text-gray-400 italic">No one online</span>
+            ) : (
+              onlineUsers.map((u) => (
+                <span
+                  key={u.id}
+                  className="px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-300 shadow-sm"
                 >
-                  <div className="flex items-start gap-6">
-                    <span className="font-semibold text-blue-600">
-                      {msg.sender?.name ?? "Guest"}
-                    </span>
-                    <span className="whitespace-pre-wrap break-words max-w-[65vw] sm:max-w-[60vw]">
-                      {msg.content}
-                    </span>
-                  </div>
-
-                  <div className="space-x-2 flex items-end justify-end">
-                    {msg.senderId === user?.id && (
-                      <>
-                        <button
-                          onClick={() => handleUpdate(String(msg._id))}
-                          className="px-2 py-1 text-sm bg-yellow-300 rounded"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDelete(String(msg._id))}
-                          className="px-2 py-1 text-sm bg-red-400 text-white rounded"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* input */}
-            <div className="flex gap-2 mb-2">
-              <input
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && handleSend()}
-                placeholder="Type your message..."
-                className="flex-1 p-2 border rounded"
-              />
-              <button
-                onClick={handleSend}
-                className="px-4 py-2 rounded text-white bg-blue-500"
-              >
-                Send
-              </button>
-            </div>
-
-            {/* summary */}
-            {summary && (
-              <div className="mt-6 p-4 border rounded bg-gray-100 text-left">
-                <h3 className="font-semibold mb-2">Chat Summary:</h3>
-                <p className="whitespace-pre-wrap">{summary}</p>
-              </div>
+                  {u.name || "Unknown"}
+                </span>
+              ))
             )}
           </div>
+
+          {/* Messages */}
+          <div
+            ref={containerRef}
+            className="flex-1 space-y-4 overflow-y-auto mb-4 border border-gray-300 rounded-2xl p-4 bg-gradient-to-b from-white to-slate-100 shadow-inner scroll-smooth"
+            style={{ wordBreak: "break-word", maxHeight: "60vh" }}
+          >
+            {messages.map((msg) => (
+              <div
+                key={msg._id}
+                className={`p-3 rounded-xl shadow-sm flex flex-col justify-between transition-all duration-200 ${
+                  msg.senderId === user?.id
+                    ? "bg-gradient-to-r from-blue-100 to-blue-50 border border-blue-300"
+                    : "bg-white border border-gray-300 hover:border-blue-200"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span
+                    className={`font-semibold ${
+                      msg.senderId === user?.id
+                        ? "text-blue-600"
+                        : "text-slate-700"
+                    }`}
+                  >
+                    {msg.sender?.name ?? "Guest"}
+                  </span>
+
+                  {msg.senderId === user?.id && (
+                    <div className="space-x-2 flex items-center">
+                      <button
+                        onClick={() => handleUpdate(String(msg._id))}
+                        className="px-2 py-1 text-sm rounded-md bg-gradient-to-r from-yellow-300 to-yellow-400 hover:from-yellow-400 hover:to-yellow-500 text-slate-800 font-medium shadow-sm"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(String(msg._id))}
+                        className="px-2 py-1 text-sm rounded-md bg-gradient-to-r from-red-400 to-red-500 hover:from-red-500 hover:to-red-600 text-white font-medium shadow-sm"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <span className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-800">
+                  {msg.content}
+                </span>
+              </div>
+            ))}
+            <div ref={messagesEndRef} />
+          </div>
+
+          {/* Input */}
+          <div className="flex gap-2">
+            <input
+              value={newMessage}
+              onChange={(e) => setNewMessage(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleSend()}
+              placeholder="Type your message..."
+              className="flex-1 p-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-all duration-200"
+            />
+            <button
+              onClick={handleSend}
+              className="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white hover:opacity-90 transition-all duration-200 shadow-md font-semibold"
+            >
+              Send
+            </button>
+          </div>
+
+          {/* Summary */}
+          {summary && (
+            <div className="mt-6 p-4 border border-indigo-200 rounded-xl bg-indigo-50 text-left shadow-sm">
+              <h3 className="font-semibold mb-2 text-indigo-700">
+                Chat Summary:
+              </h3>
+              <p className="whitespace-pre-wrap text-slate-800">{summary}</p>
+            </div>
+          )}
         </div>
 
-        {/* Right column: Summarize button (on mobile it stacks below) */}
-        <div className="mt-6 lg:mt-0 lg:ml-4 flex flex-col items-center justify-center">
+        {/* RIGHT COLUMN */}
+        <div className="flex flex-col items-center justify-center space-y-4 border-4 border-black rounded-3xl p-6 bg-white/80 shadow-xl backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <button
-            className="border-2 border-black pr-4 pl-4 rounded-full mt-4 text-center uppercase text-xl font-semibold"
             onClick={handleSummarize}
             disabled={loadingSummary}
+            className="px-6 py-3 border-2 border-indigo-500 text-indigo-600 rounded-full uppercase text-lg font-semibold hover:bg-indigo-600 hover:text-white transition-all duration-300 shadow-sm"
           >
             {loadingSummary ? "Summarizing..." : "Summarize"}
           </button>
-          <div className="block">
-            <div className="w-0 h-0 border-l-[10px] border-r-[10px] border-b-[10px] border-l-transparent border-r-transparent border-b-black mt-2"></div>
-          </div>
-          <h2 className="font-light text-xl uppercase mt-2">
-            click to summarize your chat
+
+          <div className="w-0 h-0 border-l-[10px] border-r-[10px] border-b-[10px] border-l-transparent border-r-transparent border-b-indigo-500"></div>
+
+          <h2 className="font-light text-lg text-slate-600 text-center">
+            Click to summarize your chat
           </h2>
         </div>
       </main>

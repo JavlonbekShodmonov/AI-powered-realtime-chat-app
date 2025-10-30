@@ -10,21 +10,22 @@ export function SocketProvider({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
   const [socket, setSocket] = useState<any>(null);
 
-  useEffect(() => {
-    if (!user?.id) return;
-    console.log("SocketProvider - Clerk userId:", user?.id);
-    // connect once, and keep alive while the app is open
-    const s = io("http://localhost:3001", {
-      auth: { userId: user.id },
-      transports: ["websocket"],
-    });
+useEffect(() => {
+  if (!user?.id) return;
+  const base = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
+  console.log("SocketProvider - Clerk userId:", user?.id);
+  const s = io(base, {
+    auth: { userId: user.id, userName: user.fullName || user.firstName || "Anonymous" },
+    transports: ["websocket", "polling"]
+  });
 
-    setSocket(s);
+  setSocket(s);
 
-    return () => {
-      s.disconnect();
-    };
-  }, [user?.id]);
+  return () => {
+    s.disconnect();
+  };
+}, [user?.id]);
+
 
   return (
     <SocketContext.Provider value={socket}>
