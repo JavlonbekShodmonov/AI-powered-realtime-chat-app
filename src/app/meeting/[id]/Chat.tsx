@@ -38,14 +38,17 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     }
   }, [messages]);
 
-  // --- Setup socket connection ---
+  // --- Socket setup ---
   useEffect(() => {
     if (!isLoaded || !user) return;
+    if (socketRef.current) return;
 
-    console.log("🔵 Connecting with user:", user.id, user.fullName);
+    const base =
+      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
 
-    const socket = io(process.env.NEXT_PUBLIC_SOCKET_SERVER_URL ||"",{
-      path: "/api/socket",
+    const socket = io(base, {
+      path: "/socket.io",
+      transports: ["websocket"],
       auth: {
         userId: user.id,
         userName: user.fullName || user.firstName || "Anonymous",
@@ -55,13 +58,10 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   socketRef.current = socket;
 
     socket.on("connect", () => {
-      console.log("✅ Socket connected, identifying user:", user.id);
       socket.emit("identify", {
         userId: user.id,
         userName: user.fullName || user.firstName || "Anonymous",
       });
-
-      // Join room after identifying
       socket.emit("joinRoom", {
         roomId,
         userId: user.id,
@@ -69,39 +69,30 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       });
     });
 
-    socket.on("roomUsers", (users: string[]) => {
-      console.log("📋 Room users:", users);
-      setRoomUsers(users);
-    });
+    socket.on("roomUsers", (users: string[]) => setRoomUsers(users));
 
     socket.on("initialMessages", (grouped: Record<string, any[]>) => {
       const flat = Object.values(grouped).flat();
-      console.log("📨 Initial messages loaded:", flat.length);
       setMessages(flat);
-      // ensure scroll to bottom on initial load
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
-    });
-
-    socket.on("user-joined", ({ userId }) => {
-      console.log(`${userId} joined the room`);
+      setTimeout(
+        () => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }),
+        50
+      );
     });
 
     socket.on("newMessage", (message) => {
-      console.log("📩 New message received:", message);
       const normalized = {
         ...message,
         _id: message._id?.toString?.() || String(message._id),
       };
-      setMessages((prev) => {
-        if (prev.some((m) => m._id === normalized._id)) return prev;
-        return [...prev, normalized];
-      });
+      setMessages((prev) =>
+        prev.some((m) => m._id === normalized._id)
+          ? prev
+          : [...prev, normalized]
+      );
     });
 
-    socket.on("onlineUsersWithNames", (list) => {
-      console.log("👥 Online users:", list);
-      setOnlineUsers(list);
-    });
+    socket.on("onlineUsersWithNames", (list) => setOnlineUsers(list));
 
     socket.on("messageEdited", (updated) => {
       setMessages((prev) =>
@@ -109,22 +100,41 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       );
     });
 
-    socket.on("messageDeleted", (messageId: string) => {
-      setMessages((prev) =>
-        prev.filter((msg) => msg._id !== messageId && msg.id !== messageId)
-      );
+    socket.on("messageDeleted", (id: string) => {
+      setMessages((prev) => prev.filter((m) => m._id !== id && m.id !== id));
     });
 
-    socket.on("user-left", () => {
-      alert("The other user has left the chat");
-    });
+    socket.on("user-left", () => alert("The other user has left the chat"));
 
     return () => {
-      console.log("🔴 Disconnecting socket");
-      socket.disconnect();
-      socketRef.current = null;
+      if (socketRef.current) {
+        socketRef.current.disconnect();
+        socketRef.current = null;
+      }
     };
   }, [isLoaded, user, roomId]);
+
+  // --- Online user updates ---
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    socket.on("getOnlineUsers", (users) => setOnlineUsers(users));
+    socket.on("user:online", (user) =>
+      setOnlineUsers((prev) =>
+        prev.some((u) => u.id === user.id) ? prev : [...prev, user]
+      )
+    );
+    socket.on("user:offline", (id) =>
+      setOnlineUsers((prev) => prev.filter((u) => u.id !== id))
+    );
+
+    return () => {
+      socket.off("getOnlineUsers");
+      socket.off("user:online");
+      socket.off("user:offline");
+    };
+  }, [socketRef.current]);
 
   const handleExit = () => {
     if (socketRef.current) {

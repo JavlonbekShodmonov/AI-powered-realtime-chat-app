@@ -52,6 +52,7 @@ app.post("/api/emit-appointment-update", (req, res) => {
   res.json({ success: true });
 });
 
+
 io.on("connection", (socket) => {
   console.log("🔌 New socket connected:", socket.id);
 
