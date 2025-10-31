@@ -25,6 +25,7 @@ const roomMessages = {}; // roomId -> [{...message}]
 // ✅ NEW: Store user info (to show names)
 const userInfoMap = {}; // userId -> { userName }
 
+const allowedOrigins = ["http://localhost:3000"];
 
 const io = new Server(server, {
   path: "/socket.io", // Default path - don't use /api/socket for standalone server
