@@ -1,9 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import io, { Socket } from "socket.io-client";
+import { useSession } from "next-auth/react";
+import 'next-auth';
+
+declare module 'next-auth' {
+  interface Session {
+    user: {
+      id?: string
+      name?: string | null
+      email?: string | null
+      image?: string | null
+    }
+  }
+}
 
 type ChatProps = {
   roomId: string;
@@ -11,130 +23,134 @@ type ChatProps = {
 };
 
 export default function Chat({ roomId, targetUserId }: ChatProps) {
-  const { user, isLoaded } = useUser();
+  const { data: session, status } = useSession();
   const router = useRouter();
+
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [summary, setSummary] = useState("");
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [roomUsers, setRoomUsers] = useState<string[]>([]);
-  const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string }[]>(
-    []
-  );
-  const socketRef = useRef<Socket | null>(null);
+  const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string }[]>([]);
 
+  const socketRef = useRef<Socket | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // --- Auto-scroll if near bottom when messages update ---
+  // Auto-scroll when messages update
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
     if (distanceFromBottom < 100) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages]);
 
-  // --- Socket setup ---
+  // Socket setup
   useEffect(() => {
-    if (!isLoaded || !user) return;
+    if (status !== "authenticated" || !session?.user) return;
     if (socketRef.current) return;
 
-    const base =
-      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
-
+    const base = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
     const socket = io(base, {
       path: "/socket.io",
       transports: ["websocket"],
       auth: {
-        userId: user.id,
-        userName: user.fullName || user.firstName || "Anonymous",
+        userId: session.user.id,
+        userName: session.user.name || "Anonymous",
       },
     });
 
-  socketRef.current = socket;
+    socketRef.current = socket;
 
     socket.on("connect", () => {
+      console.log("🔌 Chat socket connected:", socket.id);
+      
       socket.emit("identify", {
-        userId: user.id,
-        userName: user.fullName || user.firstName || "Anonymous",
+        userId: session.user.id,
+        userName: session.user.name || "Anonymous",
       });
+      
       socket.emit("joinRoom", {
         roomId,
-        userId: user.id,
-        userName: user.fullName || user.firstName || "Anonymous",
+        userId: session.user.id,
+        userName: session.user.name || "Anonymous",
       });
     });
 
-    socket.on("roomUsers", (users: string[]) => setRoomUsers(users));
+    socket.on("roomUsers", (users: string[]) => {
+      console.log("👥 Room users updated:", users);
+      setRoomUsers(users);
+    });
 
     socket.on("initialMessages", (grouped: Record<string, any[]>) => {
       const flat = Object.values(grouped).flat();
+      console.log("📨 Initial messages received:", flat.length);
       setMessages(flat);
-      setTimeout(
-        () => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }),
-        50
-      );
+      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
     });
 
     socket.on("newMessage", (message) => {
+      console.log("💬 New message:", message);
       const normalized = {
         ...message,
         _id: message._id?.toString?.() || String(message._id),
       };
       setMessages((prev) =>
-        prev.some((m) => m._id === normalized._id)
-          ? prev
-          : [...prev, normalized]
+        prev.some((m) => m._id === normalized._id) ? prev : [...prev, normalized]
       );
     });
 
-    socket.on("onlineUsersWithNames", (list) => setOnlineUsers(list));
+    // ✅ Listen for BOTH event names
+    socket.on("onlineUsersWithNames", (list) => {
+      console.log("✅ Online users received (onlineUsersWithNames):", list);
+      setOnlineUsers(list);
+    });
+
+    socket.on("getOnlineUsers", (list) => {
+      console.log("✅ Online users received (getOnlineUsers):", list);
+      setOnlineUsers(list);
+    });
+
+    socket.on("user:online", (user) => {
+      console.log("👤 User came online:", user);
+      setOnlineUsers((prev) => {
+        const exists = prev.some((u) => u.id === user.id);
+        if (exists) return prev;
+        return [...prev, user];
+      });
+    });
+
+    socket.on("user:offline", (userId) => {
+      console.log("👤 User went offline:", userId);
+      setOnlineUsers((prev) => prev.filter((u) => u.id !== userId));
+    });
 
     socket.on("messageEdited", (updated) => {
+      console.log("✏️ Message edited:", updated);
       setMessages((prev) =>
         prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m))
       );
     });
 
     socket.on("messageDeleted", (id: string) => {
+      console.log("🗑️ Message deleted:", id);
       setMessages((prev) => prev.filter((m) => m._id !== id && m.id !== id));
     });
 
-    socket.on("user-left", () => alert("The other user has left the chat"));
+    socket.on("user-left", () => {
+      console.log("👋 User left the chat");
+      alert("The other user has left the chat");
+    });
 
     return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      console.log("🔌 Disconnecting chat socket");
+      socket.disconnect();
+      socketRef.current = null;
     };
-  }, [isLoaded, user, roomId]);
-
-  // --- Online user updates ---
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket) return;
-
-    socket.on("getOnlineUsers", (users) => setOnlineUsers(users));
-    socket.on("user:online", (user) =>
-      setOnlineUsers((prev) =>
-        prev.some((u) => u.id === user.id) ? prev : [...prev, user]
-      )
-    );
-    socket.on("user:offline", (id) =>
-      setOnlineUsers((prev) => prev.filter((u) => u.id !== id))
-    );
-
-    return () => {
-      socket.off("getOnlineUsers");
-      socket.off("user:online");
-      socket.off("user:offline");
-    };
-  }, [socketRef.current]);
+  }, [status, session, roomId]);
 
   const handleExit = () => {
     if (socketRef.current) {
@@ -146,42 +162,35 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   };
 
   const handleSend = () => {
-    if (!newMessage.trim() || !socketRef.current || !user) return;
-
+    if (!newMessage.trim() || !socketRef.current || !session?.user) return;
     socketRef.current.emit("sendMessage", {
       roomId,
-      senderId: user.id,
-      senderName: user.fullName || user.firstName || "Anonymous",
+      senderId: session.user.id,
+      senderName: session.user.name || "Anonymous",
       content: newMessage.trim(),
       createdAt: new Date(),
     });
-
     setNewMessage("");
   };
 
   const handleUpdate = (id: string) => {
     const newText = prompt("Enter updated message:");
     if (!newText || !socketRef.current) return;
-
     socketRef.current.emit("editMessage", {
       roomId,
       messageId: String(id),
-      senderId: user?.id,
+      senderId: session?.user.id,
       newContent: newText,
     });
-
-    setMessages((prev) =>
-      prev.map((m) => (m._id === id ? { ...m, content: newText } : m))
-    );
+    setMessages((prev) => prev.map((m) => (m._id === id ? { ...m, content: newText } : m)));
   };
 
   const handleDelete = (id: string) => {
     if (!confirm("Delete this message?") || !socketRef.current) return;
-
     socketRef.current.emit("deleteMessage", {
       roomId,
       messageId: id,
-      senderId: user?.id,
+      senderId: session?.user.id,
     });
   };
 
@@ -191,9 +200,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       const res = await fetch("/api/summarize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: messages.map((m) => m.content).join("\n"),
-        }),
+        body: JSON.stringify({ text: messages.map((m) => m.content).join("\n") }),
       });
       const data = await res.json();
       setSummary(data.summary || "No summary available.");
@@ -204,7 +211,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     }
   };
 
-  if (!isLoaded) {
+  if (status === "loading") {
     return (
       <div className="flex items-center justify-center h-screen">
         <p className="text-xl">Loading...</p>
@@ -212,10 +219,14 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     );
   }
 
+  if (status === "unauthenticated") {
+    router.push("/api/auth/signin");
+    return null;
+  }
+
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-indigo-50 to-slate-100 flex justify-center items-center font-sans text-gray-800">
       <main className="flex flex-col lg:flex-row justify-center items-center lg:items-center gap-8 p-8 w-full max-w-7xl">
-
         {/* LEFT COLUMN */}
         <div className="flex flex-col items-center space-y-6 border-4 border-black rounded-3xl p-6 bg-white/80 shadow-xl backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <button
@@ -227,35 +238,43 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
         </div>
 
         {/* MIDDLE CHAT COLUMN */}
-        <div className="flex-1 relative border-4 border-black bg-white/90 backdrop-blur-md rounded-3xl shadow-2xl p-6 w-full max-w-3xl transition-all duration-300 hover:shadow-indigo-200">
-
+        <div className="relative border-4 border-black bg-white/90 backdrop-blur-md rounded-3xl shadow-2xl p-6 w-full max-w-3xl h-[85vh] flex flex-col transition-all duration-300 hover:shadow-indigo-200 overflow-hidden">
           {/* Online Users */}
-          <div className="flex flex-wrap gap-2 mb-3 text-sm font-medium">
-            {onlineUsers.length === 0 ? (
-              <span className="text-gray-400 italic">No one online</span>
-            ) : (
-              onlineUsers.map((u) => (
-                <span
-                  key={u.id}
-                  className="px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-300 shadow-sm"
-                >
-                  {u.name || "Unknown"}
-                </span>
-              ))
-            )}
+          <div className="mb-3">
+            <div className="text-xs text-gray-500 mb-1">
+              Online Users ({onlineUsers.length}):
+            </div>
+            <div className="flex flex-wrap gap-2 text-sm font-medium">
+              {onlineUsers.length === 0 ? (
+                <span className="text-gray-400 italic">Loading online users...</span>
+              ) : (
+                onlineUsers.map((u) => (
+                  <span
+                    key={u.id}
+                    className="px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-300 shadow-sm"
+                  >
+                    {u.name || "Unknown"}
+                  </span>
+                ))
+              )}
+            </div>
           </div>
 
           {/* Messages */}
           <div
             ref={containerRef}
             className="flex-1 space-y-4 overflow-y-auto mb-4 border border-gray-300 rounded-2xl p-4 bg-gradient-to-b from-white to-slate-100 shadow-inner scroll-smooth"
-            style={{ wordBreak: "break-word", maxHeight: "60vh" }}
+            style={{
+              wordBreak: "break-word",
+              height: "100%",
+              maxHeight: "100%",
+            }}
           >
             {messages.map((msg) => (
               <div
                 key={msg._id}
                 className={`p-3 rounded-xl shadow-sm flex flex-col justify-between transition-all duration-200 ${
-                  msg.senderId === user?.id
+                  msg.senderId === session?.user?.id
                     ? "bg-gradient-to-r from-blue-100 to-blue-50 border border-blue-300"
                     : "bg-white border border-gray-300 hover:border-blue-200"
                 }`}
@@ -263,7 +282,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                 <div className="flex items-center justify-between">
                   <span
                     className={`font-semibold ${
-                      msg.senderId === user?.id
+                      msg.senderId === session?.user?.id
                         ? "text-blue-600"
                         : "text-slate-700"
                     }`}
@@ -271,7 +290,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                     {msg.sender?.name ?? "Guest"}
                   </span>
 
-                  {msg.senderId === user?.id && (
+                  {msg.senderId === session?.user?.id && (
                     <div className="space-x-2 flex items-center">
                       <button
                         onClick={() => handleUpdate(String(msg._id))}

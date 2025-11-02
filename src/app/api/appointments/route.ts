@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import dbConnect from "@/lib/dbConnect";
 import Appointment from "../models/Appointment";
+import { auth } from "../../../lib/auth";
 
 // CREATE appointment
 export async function POST(req: Request) {
   try {
     const { withUserId, scheduledAt } = await req.json();
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     if (!userId) return new NextResponse("Unauthorized", { status: 401 });
 
     await dbConnect();
@@ -54,34 +54,30 @@ export async function POST(req: Request) {
 }
 
 // GET all appointments for logged-in user
-export async function GET() {
-  try {
-    const { userId } = await auth();
-    if (!userId) return new NextResponse("Unauthorized", { status: 401 });
+export async function GET(req: Request) {
+  const { userId } = await auth(req); // ✅ pass req here
+  console.log("Auth debug: ", { userId });
+  if (!userId) return new NextResponse("Unauthorized", { status: 401 });
 
-    await dbConnect();
+  await dbConnect();
+  const appointments = await Appointment.find({
+    $or: [
+      { createdBy: userId },
+      { withUserId: { $in: [userId] } },
+    ],
+  })
+    .populate("createdBy", "username email")
+    .populate("withUserId", "username email");
 
-    const appointments = await Appointment.find({
-      $or: [
-        { createdBy: userId }, // appointments I created
-        { withUserId: { $in:[userId] } }, // appointments made with me
-      ],
-    })
-      .populate("createdBy", "username email") // optional
-      .populate("withUserId", "username email");
-
-    return NextResponse.json(appointments, { status: 200 });
-  } catch (error) {
-    console.error(error);
-    return new NextResponse("Failed to fetch appointments", { status: 500 });
-  }
+  return NextResponse.json(appointments, { status: 200 });
 }
+
 
 // UPDATE appointment
 export async function PATCH(req: Request) {
   try {
     const { appointmentId, status, date, time } = await req.json();
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     if (!userId) return new NextResponse("Unauthorized", { status: 401 });
 
     await dbConnect();
@@ -126,7 +122,7 @@ export async function PATCH(req: Request) {
 export async function DELETE(req: Request) {
   try {
     const { appointmentId } = await req.json();
-    const { userId } = await auth();
+    const { userId } = await auth(req);
     if (!userId) return new NextResponse("Unauthorized", { status: 401 });
 
     await dbConnect();

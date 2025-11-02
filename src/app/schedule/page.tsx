@@ -1,12 +1,12 @@
 "use client";
 
 import DatePicker from "react-datepicker";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import "react-datepicker/dist/react-datepicker.css";
-import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
-import { io, Socket } from "socket.io-client";
 import { canEnterRoom } from "../utils/roomApi";
+import { useSession } from "next-auth/react";
+import { socketManager } from "../utils/socketClient"; // ✅ Import and USE
 
 type UserType = {
   id: string;
@@ -14,14 +14,15 @@ type UserType = {
   name: string;
 };
 
-let socket: Socket | null = null;
-
 export default function FirstPage() {
   const [showAppointments, setShowAppointments] = useState(false);
   const [showUsers, setShowUsers] = useState(false);
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
-  const { isSignedIn, user } = useUser();
+  const { data: session } = useSession();
+  const user = session?.user as UserType | undefined;
+  const isSignedIn = !!session?.user;
+
   const [users, setUsers] = useState<UserType[]>([]);
   const [error, setError] = useState("");
   const [selectedUsers, setSelectedUsers] = useState<UserType[]>([]);
@@ -34,53 +35,50 @@ export default function FirstPage() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
   const [pendingNotifications, setPendingNotifications] = useState<any[]>([]);
-  // Add these new states
-const [searchTerm, setSearchTerm] = useState("");
-const [isSearching, setIsSearching] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
 
-const handleSearch = async (query: string) => {
-  setSearchTerm(query);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
-  // only search when the user actually types something
-  if (query.trim().length === 0) {
-    setUsers([]);
-    setIsSearching(false);
-    return;
-  }
+  const handleSearch = async (query: string) => {
+    setSearchTerm(query);
 
-  setIsSearching(true);
-
-  try {
-    const res = await fetch(`/api/get-users?search=${encodeURIComponent(query)}`);
-    if (!res.ok) throw new Error("Failed to search users");
-
-    const data: UserType[] = await res.json();
-
-    // only show users if there are matches, otherwise show empty list
-    if (data && data.length > 0) {
-      setUsers(data);
-    } else {
+    if (query.trim().length === 0) {
       setUsers([]);
+      setIsSearching(false);
+      return;
     }
-  } catch (err) {
-    console.error("Search error:", err);
-    setUsers([]);
-  } finally {
-    setIsSearching(false);
-  }
-};
 
+    setIsSearching(true);
 
-  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+    try {
+      const res = await fetch(
+        `/api/get-users?search=${encodeURIComponent(query)}`
+      );
+      if (!res.ok) throw new Error("Failed to search users");
 
+      const data: UserType[] = await res.json();
+
+      if (data && data.length > 0) {
+        setUsers(data);
+      } else {
+        setUsers([]);
+      }
+    } catch (err) {
+      console.error("Search error:", err);
+      setUsers([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  // ✅ Setup audio once on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
       audioRef.current = new Audio("/notification.mp3");
       setIsClient(true);
     }
   }, []);
-
-  const searchUsers = () => {};
 
   const unlockAudio = () => {
     audioRef.current
@@ -144,13 +142,19 @@ const handleSearch = async (query: string) => {
       .catch(() => {});
   };
 
+  // Fetch appointments once when user is available
   useEffect(() => {
-    if (!user) return;
+    if (!user?.id) return;
 
     const fetchAppointments = async () => {
       try {
-        const res = await fetch("/api/appointments");
-        if (!res.ok) throw new Error("Failed to fetch appointments");
+        const res = await fetch("/api/appointments", {
+          method: "GET",
+          credentials: "include",
+        });
+        if (!res.ok) {
+          throw new Error("Failed to fetch appointments: " + res.statusText);
+        }
         const data = await res.json();
         setAppointments(data);
       } catch (err) {
@@ -159,53 +163,58 @@ const handleSearch = async (query: string) => {
     };
 
     fetchAppointments();
+  }, [user?.id]);
 
-    if (!socket) {
-      socket = io("http://localhost:3001", {
-        auth: { userId: user.id },
-        transports: ["websocket", "polling"],
-      });
+  // ✅ Socket connection using singleton manager
+  useEffect(() => {
+    if (!user?.id) return;
 
-      socket.on("connect", () => {
-        console.log("✅ Presence socket connected:", socket?.id);
-      });
+    // ✅ USE socketManager to connect
+    const socket = socketManager.connect(user.id);
 
-      socket.on("newAppointment", (appointment) => {
-        console.log("📅 New appointment received:", appointment);
+    // Set up event listeners
+    const handleNewAppointment = (appointment: any) => {
+      console.log("📅 New appointment received:", appointment);
 
-        setAppointments((prev) => [...prev, appointment]);
-
-        // Play sound safely
-        if (audioUnlocked && audioRef.current) {
-          audioRef.current.play().catch(() => {});
+      setAppointments((prev) => {
+        const exists = prev.some((a) => a._id === appointment._id);
+        if (exists) {
+          console.log("⚠️ Appointment already exists, skipping duplicate");
+          return prev;
         }
-
-        // Show notification if allowed
-        if (Notification.permission === "granted") {
-          new Notification("New Appointment", {
-            body: `Appointment on ${new Date(
-              appointment.scheduledAt
-            ).toLocaleString()}`,
-            icon: "/favicon.avif",
-          });
-        } else {
-          console.log("Notification permission not granted.");
-        }
+        return [...prev, appointment];
       });
 
-      socket.on("appointment:updated", (updated) => {
-        console.log("📝 Appointment updated:", updated);
-        setAppointments((prev) =>
-          prev.map((a) => (a._id === updated._id ? updated : a))
-        );
-      });
-    }
+      if (audioUnlocked && audioRef.current) {
+        audioRef.current.play().catch(() => {});
+      }
 
-    return () => {
-      socket?.disconnect();
-      socket = null;
+      if (Notification.permission === "granted") {
+        new Notification("New Appointment", {
+          body: `Appointment on ${new Date(
+            appointment.scheduledAt
+          ).toLocaleString()}`,
+          icon: "/favicon.avif",
+        });
+      }
     };
-  }, [user, audioUnlocked, notificationsEnabled]);
+
+    const handleAppointmentUpdated = (updated: any) => {
+      console.log("📝 Appointment updated:", updated);
+      setAppointments((prev) =>
+        prev.map((a) => (a._id === updated._id ? updated : a))
+      );
+    };
+
+    socket.on("newAppointment", handleNewAppointment);
+    socket.on("appointment:updated", handleAppointmentUpdated);
+
+    // Cleanup: remove listeners but don't disconnect (singleton manages lifecycle)
+    return () => {
+      socket.off("newAppointment", handleNewAppointment);
+      socket.off("appointment:updated", handleAppointmentUpdated);
+    };
+  }, [user?.id, audioUnlocked]);
 
   const handleStartChatAndCreateAppointment = async () => {
     if (!isReady || !selectedUsers) {
@@ -218,6 +227,7 @@ const handleSearch = async (query: string) => {
     try {
       const res = await fetch("/api/appointments", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           withUserId: selectedUsers.map((u) => u.id),
@@ -228,7 +238,13 @@ const handleSearch = async (query: string) => {
       if (!res.ok) throw new Error("Failed to create appointment");
 
       const newAppointment = await res.json();
-      setAppointments((prev) => [...prev, newAppointment]);
+      
+      // ✅ Check for duplicates before adding
+      setAppointments((prev) => {
+        const exists = prev.some((a) => a._id === newAppointment._id);
+        if (exists) return prev;
+        return [...prev, newAppointment];
+      });
 
       router.push(`/meeting/${newAppointment._id}`);
     } catch (err: any) {
@@ -245,6 +261,7 @@ const handleSearch = async (query: string) => {
     try {
       const res = await fetch("/api/appointments", {
         method: "PATCH",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ appointmentId, status: newStatus }),
       });
@@ -260,7 +277,6 @@ const handleSearch = async (query: string) => {
     }
   };
 
-  // 🔑 NEW: Helper to determine min/max time based on selected date
   const getMinMaxTime = () => {
     if (!startDate) {
       return {
@@ -272,20 +288,17 @@ const handleSearch = async (query: string) => {
     const today = new Date();
     const selectedDay = new Date(startDate);
 
-    // Check if selected date is today
     const isToday =
       selectedDay.getDate() === today.getDate() &&
       selectedDay.getMonth() === today.getMonth() &&
       selectedDay.getFullYear() === today.getFullYear();
 
     if (isToday) {
-      // For today, only allow times after current time
       return {
         minTime: new Date(),
         maxTime: new Date(new Date().setHours(23, 59, 59, 999)),
       };
     } else {
-      // For future dates, allow any time
       return {
         minTime: new Date(new Date().setHours(0, 0, 0, 0)),
         maxTime: new Date(new Date().setHours(23, 59, 59, 999)),
@@ -442,70 +455,57 @@ const handleSearch = async (query: string) => {
         </button>
 
         {showUsers && (
-  <div className="mt-4 w-full">
-    <h3 className="font-semibold text-lg mb-2">Search for a user:</h3>
+          <div className="mt-4 w-full">
+            <h3 className="font-semibold text-lg mb-2">Search for a user:</h3>
 
-    {/* 🔍 Search Input */}
-    <input
-  type="text"
-  placeholder="Search users..."
-  value={searchTerm}
-  onChange={(e) => handleSearch(e.target.value)}
-  className="border p-2 rounded w-full"
-/>
+            <input
+              type="text"
+              placeholder="Search users..."
+              value={searchTerm}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="border p-2 rounded w-full"
+            />
 
-{isSearching && <p>Searching...</p>}
+            {isSearching && <p>Searching...</p>}
 
-{!isSearching && users.length > 0 && (
-  <ul>
-    {users.map((user) => (
-      <li key={user.id}>{user.name}</li>
-    ))}
-  </ul>
-)}
+            {searchTerm && users.length > 0 && (
+              <ul className="space-y-2 mt-2">
+                {users.map((user) => (
+                  <li key={user.id} className="text-left">
+                    <button
+                      className={`border p-2 rounded w-full ${
+                        selectedUsers.some((u) => u.id === user.id)
+                          ? "bg-black/90 border border-white/10 hover:border-white/20 transition-all duration-300 backdrop-blur-sm relative overflow-hidden text-white"
+                          : "bg-gray-100 hover:bg-black hover:text-white"
+                      }`}
+                      onClick={() =>
+                        setSelectedUsers((prev) =>
+                          prev.some((u) => u.id === user.id)
+                            ? prev.filter((u) => u.id !== user.id)
+                            : [...prev, user]
+                        )
+                      }
+                    >
+                      {selectedUsers.some((u) => u.id === user.id) && (
+                        <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-40 pointer-events-none"></div>
+                      )}
+                      <span className="relative z-10">
+                        <strong>{user.name}</strong>{" "}
+                        <span className="text-gray-400 text-sm">
+                          ({user.email})
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
 
-
-    {/* Show users only when typing */}
-    {searchTerm && users.length > 0 && (
-      <ul className="space-y-2 mt-2">
-        {users.map((user) => (
-          <li key={user.id} className="text-left">
-            <button
-              className={`border p-2 rounded w-full ${
-                selectedUsers.some((u) => u.id === user.id)
-                  ? "bg-black/90 border border-white/10 hover:border-white/20 transition-all duration-300 backdrop-blur-sm relative overflow-hidden text-white"
-                  : "bg-gray-100 hover:bg-black hover:text-white"
-              }`}
-              onClick={() =>
-                setSelectedUsers((prev) =>
-                  prev.some((u) => u.id === user.id)
-                    ? prev.filter((u) => u.id !== user.id)
-                    : [...prev, user]
-                )
-              }
-            >
-              {selectedUsers.some((u) => u.id === user.id) && (
-                <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-40 pointer-events-none"></div>
-              )}
-              <span className="relative z-10">
-                <strong>{user.name}</strong>{" "}
-                <span className="text-gray-400 text-sm">
-                  ({user.email})
-                </span>
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
-    )}
-
-    {/* No users found */}
-    {searchTerm && users.length === 0 && !isSearching && (
-      <p className="text-gray-500 italic mt-2">No users found</p>
-    )}
-  </div>
-)}
-
+            {searchTerm && users.length === 0 && !isSearching && (
+              <p className="text-gray-500 italic mt-2">No users found</p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

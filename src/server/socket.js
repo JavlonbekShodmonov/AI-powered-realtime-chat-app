@@ -18,17 +18,14 @@ const server = http.createServer(app);
 
 // ✅ Track users and rooms
 const userSocketMap = {}; // userId -> [socketIds]
-const onlineUsers = new Map(); // userId -> socketId
+const onlineUsers = new Map(); // userId -> {socketId, name}
 const roomUsers = {}; // roomId -> [userIds]
 const roomMessages = {}; // roomId -> [{...message}]
-
-// ✅ NEW: Store user info (to show names)
-const userInfoMap = {}; // userId -> { userName }
 
 const allowedOrigins = ["http://localhost:3000"];
 
 const io = new Server(server, {
-  path: "/socket.io", // Default path - don't use /api/socket for standalone server
+  path: "/socket.io",
   cors: { 
     origin: allowedOrigins, 
     credentials: true 
@@ -38,26 +35,51 @@ const io = new Server(server, {
 // ✅ REST endpoints for presence and appointments
 app.get("/api/presence/:userId", (req, res) => {
   const { userId } = req.params;
-  res.json({ online: onlineUsers.has(userId) });
+  const isOnline = onlineUsers.has(userId);
+  
+  // ✅ Enhanced logging
+  console.log(`🔍 Presence check for ${userId}: ${isOnline ? "✅ ONLINE" : "❌ OFFLINE"}`);
+  
+  if (isOnline) {
+    const userInfo = onlineUsers.get(userId);
+    console.log(`   User info:`, userInfo);
+  }
+  
+  console.log(`   Currently online users:`, Array.from(onlineUsers.keys()));
+  
+  res.json({ online: isOnline });
 });
 
 app.post("/api/emit-appointment", (req, res) => {
   const appointment = req.body;
+  console.log("📅 Emitting new appointment:", appointment._id);
   io.emit("newAppointment", appointment);
   res.json({ success: true });
 });
 
 app.post("/api/emit-appointment-update", (req, res) => {
   const appointment = req.body;
+  console.log("📝 Emitting appointment update:", appointment._id);
   io.emit("appointment:updated", appointment);
   res.json({ success: true });
 });
 
+// ✅ Health check endpoint
+app.get("/", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    onlineUsers: Array.from(onlineUsers.keys()),
+    totalConnections: Object.keys(userSocketMap).length
+  });
+});
 
 io.on("connection", (socket) => {
   console.log("🔌 New socket connected:", socket.id);
 
   const { userId, userName } = socket.handshake.auth || {};
+
+  // ✅ Enhanced logging for debugging
+  console.log("   Auth data:", { userId, userName });
 
   if (userId) {
     // Track online users
@@ -69,17 +91,25 @@ io.on("connection", (socket) => {
       name: userName || "Anonymous",
     });
 
+    console.log(`✅ User ${userName || userId} is now ONLINE`);
+    console.log(`   Total online users: ${onlineUsers.size}`);
+
     // Emit presence updates
     io.emit("user:online", { id: userId, name: userName || "Anonymous" });
 
-    // Emit full list of users with names
+    // ✅ FIXED: Emit with consistent event names
     const allOnline = Object.keys(userSocketMap).map((id) => ({
       id,
       name: onlineUsers.get(id)?.name || "Anonymous",
     }));
+    
+    // Emit BOTH event names for compatibility
     io.emit("getOnlineUsers", allOnline);
-
-    console.log(`✅ User ${userName || userId} connected`);
+    io.emit("onlineUsersWithNames", allOnline);
+    
+    console.log(`   Broadcasting online users:`, allOnline);
+  } else {
+    console.warn("⚠️ Socket connected without userId in auth!");
   }
 
   // ✅ Join Room
@@ -94,6 +124,14 @@ io.on("connection", (socket) => {
     // Send existing messages
     const grouped = { today: roomMessages[roomId] || [] };
     socket.emit("initialMessages", grouped);
+    
+    // ✅ NEW: Send current online users when joining room
+    const allOnline = Object.keys(userSocketMap).map((id) => ({
+      id,
+      name: onlineUsers.get(id)?.name || "Anonymous",
+    }));
+    socket.emit("onlineUsersWithNames", allOnline);
+    console.log(`   Sent online users to ${userName}:`, allOnline);
   });
 
   // ✅ Send Message
@@ -144,7 +182,7 @@ io.on("connection", (socket) => {
   socket.on("disconnect", () => {
     if (!userId) return;
 
-    console.log(`❌ ${userName || userId} disconnected`);
+    console.log(`❌ ${userName || userId} disconnecting...`);
 
     userSocketMap[userId] = (userSocketMap[userId] || []).filter(
       (id) => id !== socket.id
@@ -154,24 +192,32 @@ io.on("connection", (socket) => {
       delete userSocketMap[userId];
       onlineUsers.delete(userId);
 
-      // ✅ NEW: Remove from userInfoMap
-      delete userInfoMap[userId];
+      console.log(`   User ${userId} is now OFFLINE`);
+      console.log(`   Remaining online users: ${onlineUsers.size}`);
 
       io.emit("user:offline", userId);
+    } else {
+      console.log(`   User ${userId} still has ${userSocketMap[userId].length} connection(s)`);
     }
 
-    // ✅ UPDATED: Emit full list with names
+    // ✅ FIXED: Emit updated online users list with BOTH event names
     const allOnline = Object.keys(userSocketMap).map((id) => ({
       id,
       name: onlineUsers.get(id)?.name || "Anonymous",
     }));
+    
     io.emit("getOnlineUsers", allOnline);
+    io.emit("onlineUsersWithNames", allOnline);
+    
+    console.log(`   Broadcasting updated online users:`, allOnline);
   });
 });
 
-
 server.listen(3001, () => {
-  console.log(
-    "✅ Socket.IO + Chat + Presence running at http://localhost:3001"
-  );
+  console.log("✅ Socket.IO server running at http://localhost:3001");
+  console.log("📊 Endpoints:");
+  console.log("   GET  /api/presence/:userId");
+  console.log("   POST /api/emit-appointment");
+  console.log("   POST /api/emit-appointment-update");
+  console.log("   GET  / (health check)");
 });

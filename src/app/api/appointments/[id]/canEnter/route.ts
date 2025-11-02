@@ -1,15 +1,14 @@
-import { auth } from "@clerk/nextjs/server";
-import { clientPromise } from "@/lib/mongodb";
+import clientPromise from "@/lib/mongodb";
 import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
-
+import {auth} from "@/lib/auth";
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     // 1. Auth check - properly await auth()
-    const authResult = await auth();
+    const authResult = await auth(req);
     const userId = authResult?.userId;
     
     if (!userId) {
@@ -151,3 +150,4 @@ const socketUrl =
     );
   }
 }
+

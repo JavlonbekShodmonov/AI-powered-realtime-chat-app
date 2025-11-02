@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
-import { getAuth } from "@clerk/nextjs/server";
+import { getServerSession } from "next-auth";
+import { authOptions } from "../../lib/auth"; // we’ll create this next
 
-const meetings: any[] = []; // Replace with DB later
+const meetings: any[] = []; // still temporary
 
 export async function POST(req: NextRequest) {
-  const { userId } = getAuth(req);
-  const body = await req.json();
-  const { userA, userB } = body;
-  if (userId !== userA && userId !== userB) {
+  const session = await getServerSession(authOptions);
+  if (!session || !session.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
   }
+
+  const body = await req.json();
+  const { userA, userB } = body;
 
   const meetingId = uuidv4();
   const meetingLink = `${process.env.NEXT_PUBLIC_BASE_URL}/meeting/${meetingId}`;

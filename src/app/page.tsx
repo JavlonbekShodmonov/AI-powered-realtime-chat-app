@@ -1,15 +1,11 @@
 "use client";
 
+import { signIn, signOut, useSession } from "next-auth/react";
 import React from "react";
-import {
-  SignedIn,
-  SignedOut,
-  SignInButton,
-  SignUpButton,
-  UserButton,
-} from "@clerk/nextjs";
 
 export default function Home() {
+  const { data: session } = useSession();
+
   return (
     <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-blue-900 via-gray-900 to-purple-900">
       <div className="text-center px-4">
@@ -22,25 +18,37 @@ export default function Home() {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
-          <SignedOut>
+          {!session ? (
             <>
-              <SignInButton>
-                <button className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 w-full sm:w-auto text-center">
-                  Login
-                </button>
-              </SignInButton>
-              <SignUpButton>
-                <button className="px-8 py-3 bg-white hover:bg-gray-100 text-gray-900 font-semibold rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 w-full sm:w-auto text-center">
-                  Register
-                </button>
-              </SignUpButton>
+              <button
+                onClick={() => signIn("google")}
+                className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 w-full sm:w-auto text-center"
+              >
+                Login with Google
+              </button>
+              <button
+                onClick={() => signIn("github")}
+                className="px-8 py-3 bg-gray-800 hover:bg-gray-900 text-white font-semibold rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 w-full sm:w-auto text-center"
+              >
+                Login with GitHub
+              </button>
             </>
-          </SignedOut>
-          <SignedIn>
-            <a href="/schedule" className="px-8 py-3 bg-white hover:bg-gray-100 text-gray-900 font-semibold rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 w-full sm:w-auto text-center">
+          ) : (
+            <>
+              <a
+                href="/schedule"
+                className="px-8 py-3 bg-white hover:bg-gray-100 text-gray-900 font-semibold rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 w-full sm:w-auto text-center"
+              >
                 Go to schedule
               </a>
-          </SignedIn>
+              <button
+                onClick={() => signOut()}
+                className="px-8 py-3 bg-red-500 hover:bg-red-600 text-white font-semibold rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 w-full sm:w-auto text-center"
+              >
+                Sign Out
+              </button>
+            </>
+          )}
         </div>
 
         <div className="mt-12 text-gray-400 text-sm">
