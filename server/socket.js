@@ -8,10 +8,14 @@ const app = express();
 // ✅ Enable CORS and JSON parsing
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin: [
+      "http://localhost:3000",
+      "https://shadmanov.onrender.com"
+    ],
     credentials: true,
   })
 );
+
 app.use(express.json());
 
 const server = http.createServer(app);
@@ -22,15 +26,19 @@ const onlineUsers = new Map(); // userId -> {socketId, name}
 const roomUsers = {}; // roomId -> [userIds]
 const roomMessages = {}; // roomId -> [{...message}]
 
-const allowedOrigins = ["http://localhost:3000"];
+const allowedOrigins = [
+  "http://localhost:3000",
+  "https://shadmanov.onrender.com"
+];
 
 const io = new Server(server, {
   path: "/socket.io",
-  cors: { 
-    origin: allowedOrigins, 
-    credentials: true 
+  cors: {
+    origin: allowedOrigins,
+    credentials: true,
   },
 });
+
 
 // ✅ REST endpoints for presence and appointments
 app.get("/api/presence/:userId", (req, res) => {
