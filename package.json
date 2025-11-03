@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "socket": "node src/server/socket.js",
+    "socket": "node server/socket.js",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",

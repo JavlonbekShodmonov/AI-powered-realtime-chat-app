@@ -34,7 +34,7 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     "src"
-, "src/server/socket.js"  ],
+, "server/socket.js"  ],
   "exclude": [
     "node_modules"
   ]
