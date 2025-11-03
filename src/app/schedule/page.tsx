@@ -170,7 +170,7 @@ export default function FirstPage() {
     if (!user?.id) return;
 
     // ✅ USE socketManager to connect
-    const socket = socketManager.connect(user.id,process.env.NEXT_PUBLIC_SOCKET_SERVER_URL);
+    const socket = socketManager.connect(user.id,process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "https://shadmanov-socket.onrender.com");
 
     // Set up event listeners
     const handleNewAppointment = (appointment: any) => {
