@@ -55,6 +55,11 @@ export default function Home() {
           <p>Need help? Contact support</p>
         </div>
       </div>
+      <footer className="fixed select-none bottom-0 right-0 text-gray-400">
+        <p>
+          @ 2025 Shadmanov. All Rights Reserved.
+        </p>
+      </footer>
     </main>
   );
 }

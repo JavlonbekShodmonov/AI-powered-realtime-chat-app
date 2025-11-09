@@ -507,7 +507,12 @@ export default function FirstPage() {
           </div>
         )}
       </div>
-    </div>
+      <footer className="fixed select-none bottom-0 right-0 text-gray-400">
+        <p>
+          @ 2025 Shadmanov. All Rights Reserved.
+        </p>
+      </footer>
+    </div>   
   );
 }
 
@@ -573,5 +578,6 @@ function EnterRoomButton({ appointment, router }: any) {
         <p className="text-sm text-red-500">{status.reason}</p>
       )}
     </div>
+    
   );
 }
