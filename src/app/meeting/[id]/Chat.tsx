@@ -103,7 +103,6 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       );
     });
 
-    // ✅ Listen for BOTH event names
     socket.on("onlineUsersWithNames", (list) => {
       console.log("✅ Online users received (onlineUsersWithNames):", list);
       setOnlineUsers(list);
@@ -225,10 +224,30 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   }
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-indigo-50 to-slate-100 flex justify-center items-center font-sans text-gray-800">
-      <main className="flex flex-col lg:flex-row justify-center items-center lg:items-center gap-8 p-8 w-full max-w-7xl">
-        {/* LEFT COLUMN */}
-        <div className="flex flex-col items-center space-y-6 border-4 border-black rounded-3xl p-6 bg-white/80 shadow-xl backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
+    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-indigo-50 to-slate-100 flex flex-col font-sans text-gray-800">
+      {/* Mobile Header - Only visible on small screens */}
+      <div className="lg:hidden sticky top-0 z-10 bg-white/90 backdrop-blur-md border-b-2 border-gray-200 shadow-sm px-4 py-3 flex items-center justify-between">
+        <h1 className="text-lg font-semibold text-slate-700">Chat Room</h1>
+        <div className="flex gap-2">
+          <button
+            onClick={handleSummarize}
+            disabled={loadingSummary}
+            className="px-3 py-2 text-sm border-2 border-indigo-500 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all duration-300 font-semibold"
+          >
+            {loadingSummary ? "..." : "Summarize"}
+          </button>
+          <button
+            onClick={handleExit}
+            className="px-3 py-2 text-sm border-2 border-indigo-500 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all duration-300 font-semibold"
+          >
+            Exit
+          </button>
+        </div>
+      </div>
+
+      <main className="flex flex-col lg:flex-row justify-center items-center lg:items-center gap-4 lg:gap-8 p-2 sm:p-4 lg:p-8 w-full max-w-7xl mx-auto flex-1">
+        {/* LEFT COLUMN - Hidden on mobile */}
+        <div className="hidden lg:flex flex-col items-center space-y-6 border-4 border-black rounded-3xl p-6 bg-white/80 shadow-xl backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <button
             onClick={handleExit}
             className="px-6 py-3 border-2 border-indigo-500 text-indigo-600 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all duration-300 font-semibold shadow-sm"
@@ -238,20 +257,22 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
         </div>
 
         {/* MIDDLE CHAT COLUMN */}
-        <div className="relative border-4 border-black bg-white/90 backdrop-blur-md rounded-3xl shadow-2xl p-6 w-full max-w-3xl h-[85vh] flex flex-col transition-all duration-300 hover:shadow-indigo-200 overflow-hidden">
+        <div className="relative border-2 lg:border-4 border-black bg-white/90 backdrop-blur-md rounded-2xl lg:rounded-3xl shadow-2xl p-3 sm:p-4 lg:p-6 w-full max-w-3xl flex flex-col transition-all duration-300 hover:shadow-indigo-200 overflow-hidden"
+          style={{ height: 'calc(100vh - 80px)', maxHeight: 'calc(100vh - 80px)' }}
+        >
           {/* Online Users */}
-          <div className="mb-3">
+          <div className="mb-3 flex-shrink-0">
             <div className="text-xs text-gray-500 mb-1">
               Online Users ({onlineUsers.length}):
             </div>
-            <div className="flex flex-wrap gap-2 text-sm font-medium">
+            <div className="flex flex-wrap gap-1 sm:gap-2 text-xs sm:text-sm font-medium">
               {onlineUsers.length === 0 ? (
                 <span className="text-gray-400 italic">Loading online users...</span>
               ) : (
                 onlineUsers.map((u) => (
                   <span
                     key={u.id}
-                    className="px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-300 shadow-sm"
+                    className="px-2 sm:px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-300 shadow-sm"
                   >
                     {u.name || "Unknown"}
                   </span>
@@ -263,25 +284,24 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
           {/* Messages */}
           <div
             ref={containerRef}
-            className="flex-1 space-y-4 overflow-y-auto mb-4 border border-gray-300 rounded-2xl p-4 bg-gradient-to-b from-white to-slate-100 shadow-inner scroll-smooth"
+            className="flex-1 space-y-3 sm:space-y-4 overflow-y-auto mb-3 sm:mb-4 border border-gray-300 rounded-xl lg:rounded-2xl p-3 sm:p-4 bg-gradient-to-b from-white to-slate-100 shadow-inner scroll-smooth"
             style={{
               wordBreak: "break-word",
-              height: "100%",
-              maxHeight: "100%",
+              minHeight: 0,
             }}
           >
             {messages.map((msg) => (
               <div
                 key={msg._id}
-                className={`p-3 rounded-xl shadow-sm flex flex-col justify-between transition-all duration-200 ${
+                className={`p-2 sm:p-3 rounded-lg sm:rounded-xl shadow-sm flex flex-col justify-between transition-all duration-200 ${
                   msg.senderId === session?.user?.id
                     ? "bg-gradient-to-r from-blue-100 to-blue-50 border border-blue-300"
                     : "bg-white border border-gray-300 hover:border-blue-200"
                 }`}
               >
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between gap-2">
                   <span
-                    className={`font-semibold ${
+                    className={`font-semibold text-sm sm:text-base ${
                       msg.senderId === session?.user?.id
                         ? "text-blue-600"
                         : "text-slate-700"
@@ -291,16 +311,16 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                   </span>
 
                   {msg.senderId === session?.user?.id && (
-                    <div className="space-x-2 flex items-center">
+                    <div className="space-x-1 sm:space-x-2 flex items-center flex-shrink-0">
                       <button
                         onClick={() => handleUpdate(String(msg._id))}
-                        className="px-2 py-1 text-sm rounded-md bg-gradient-to-r from-yellow-300 to-yellow-400 hover:from-yellow-400 hover:to-yellow-500 text-slate-800 font-medium shadow-sm"
+                        className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-yellow-300 to-yellow-400 hover:from-yellow-400 hover:to-yellow-500 text-slate-800 font-medium shadow-sm"
                       >
                         Edit
                       </button>
                       <button
                         onClick={() => handleDelete(String(msg._id))}
-                        className="px-2 py-1 text-sm rounded-md bg-gradient-to-r from-red-400 to-red-500 hover:from-red-500 hover:to-red-600 text-white font-medium shadow-sm"
+                        className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-red-400 to-red-500 hover:from-red-500 hover:to-red-600 text-white font-medium shadow-sm"
                       >
                         Delete
                       </button>
@@ -308,7 +328,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                   )}
                 </div>
 
-                <span className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-800">
+                <span className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-800 text-sm sm:text-base">
                   {msg.content}
                 </span>
               </div>
@@ -317,17 +337,17 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
           </div>
 
           {/* Input */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-shrink-0">
             <input
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
               placeholder="Type your message..."
-              className="flex-1 p-3 border rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-all duration-200"
+              className="flex-1 p-2 sm:p-3 text-sm sm:text-base border rounded-lg sm:rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-400 transition-all duration-200"
             />
             <button
               onClick={handleSend}
-              className="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white hover:opacity-90 transition-all duration-200 shadow-md font-semibold"
+              className="px-4 sm:px-6 py-2 sm:py-3 text-sm sm:text-base rounded-lg sm:rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white hover:opacity-90 transition-all duration-200 shadow-md font-semibold"
             >
               Send
             </button>
@@ -335,17 +355,17 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
           {/* Summary */}
           {summary && (
-            <div className="mt-6 p-4 border border-indigo-200 rounded-xl bg-indigo-50 text-left shadow-sm">
-              <h3 className="font-semibold mb-2 text-indigo-700">
+            <div className="mt-3 sm:mt-6 p-3 sm:p-4 border border-indigo-200 rounded-xl bg-indigo-50 text-left shadow-sm flex-shrink-0">
+              <h3 className="font-semibold mb-2 text-indigo-700 text-sm sm:text-base">
                 Chat Summary:
               </h3>
-              <p className="whitespace-pre-wrap text-slate-800">{summary}</p>
+              <p className="whitespace-pre-wrap text-slate-800 text-xs sm:text-sm">{summary}</p>
             </div>
           )}
         </div>
 
-        {/* RIGHT COLUMN */}
-        <div className="flex flex-col items-center justify-center space-y-4 border-4 border-black rounded-3xl p-6 bg-white/80 shadow-xl backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
+        {/* RIGHT COLUMN - Hidden on mobile */}
+        <div className="hidden lg:flex flex-col items-center justify-center space-y-4 border-4 border-black rounded-3xl p-6 bg-white/80 shadow-xl backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
           <button
             onClick={handleSummarize}
             disabled={loadingSummary}
@@ -360,12 +380,12 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
             Click to summarize your chat
           </h2>
         </div>
-        <footer className="fixed select-none bottom-0 right-0 text-gray-400">
-        <p>
-          @ 2025 Shadmanov. All Rights Reserved.
-        </p>
-      </footer>
       </main>
+
+      {/* Footer - adjusted for mobile */}
+      <footer className="text-center lg:text-right py-2 px-4 text-xs sm:text-sm text-gray-400">
+        <p>@ 2025 Shadmanov. All Rights Reserved.</p>
+      </footer>
     </div>
   );
 }
