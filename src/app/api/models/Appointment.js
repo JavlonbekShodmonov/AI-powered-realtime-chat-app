@@ -1,13 +1,11 @@
-// api/models/Appointment.js
+// models/Appointment.ts
 import mongoose from "mongoose";
 
 const AppointmentSchema = new mongoose.Schema(
   {
-    createdBy: { type: String, required: true },       // creator's userId
-    withUserId: { type: [String], required: true },    // array of invited userIds
-
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    withUserId: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     scheduledAt: { type: Date, required: true },
-
     status: {
       type: String,
       enum: ["pending", "accepted", "declined", "cancelled"],
@@ -17,5 +15,4 @@ const AppointmentSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-export default mongoose.models.Appointment ||
-  mongoose.model("Appointment", AppointmentSchema);
+export default mongoose.models.Appointment || mongoose.model("Appointment", AppointmentSchema);

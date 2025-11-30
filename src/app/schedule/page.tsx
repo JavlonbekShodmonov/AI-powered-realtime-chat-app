@@ -6,7 +6,7 @@ import "react-datepicker/dist/react-datepicker.css";
 import { useRouter } from "next/navigation";
 import { canEnterRoom } from "../utils/roomApi";
 import { useSession } from "next-auth/react";
-import { socketManager } from "../utils/socketClient"; // ✅ Import and USE
+import { socketManager } from "../utils/socketClient";
 
 type UserType = {
   id: string;
@@ -34,10 +34,9 @@ export default function FirstPage() {
   const [isClient, setIsClient] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
-  const [pendingNotifications, setPendingNotifications] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isSearching, setIsSearching] = useState(false);
-
+  const publicKey = process.env.NEXT_PUBLIC_PUBLIC_KEY;
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const handleSearch = async (query: string) => {
@@ -77,6 +76,17 @@ export default function FirstPage() {
     if (typeof window !== "undefined") {
       audioRef.current = new Audio("/notification.mp3");
       setIsClient(true);
+
+      // Check if service worker is registered
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistration().then((reg) => {
+          if (reg) {
+            console.log("✅ Service worker already registered:", reg.scope);
+          } else {
+            console.log("⚠️ No service worker registered yet");
+          }
+        });
+      }
     }
   }, []);
 
@@ -113,34 +123,133 @@ export default function FirstPage() {
     }
   };
 
+  // ✅ FIXED: Proper notification setup with subscription
   const handleEnableNotifications = async () => {
     if (!("Notification" in window)) {
       alert("This browser does not support notifications.");
       return;
     }
 
-    const permission = await Notification.requestPermission();
-    if (permission === "granted") {
-      setNotificationsEnabled(true);
-      alert("Notifications enabled! 🎉");
-
-      pendingNotifications.forEach((appointment) => {
-        const audio = new Audio("/notification.mp3");
-        audio.play().catch(() => {});
-        new Notification("New Appointment", {
-          body: `Appointment on ${appointment.scheduledAt} with ${appointment.createdBy.username}`,
-          icon: "/favicon.avif",
-        });
-      });
-      setPendingNotifications([]);
+    if (!("serviceWorker" in navigator)) {
+      alert("This browser does not support service workers.");
+      return;
     }
 
-    const audio = new Audio("/notification.mp3");
-    audio
-      .play()
-      .then(() => setAudioUnlocked(true))
-      .catch(() => {});
+    if (!user?.id) {
+      alert("You must be logged in to enable notifications");
+      return;
+    }
+
+    try {
+      // Request notification permission
+      const permission = await Notification.requestPermission();
+
+      if (permission !== "granted") {
+        alert("Notification permission denied");
+        return;
+      }
+
+      console.log("🔔 Permission granted, registering service worker...");
+
+      // Register service worker
+      const registration = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+
+      console.log("✅ Service worker registered");
+
+      // Check if already subscribed
+      let subscription = await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        console.log("📝 Creating new push subscription...");
+        // Subscribe to push notifications
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey || ""),
+        });
+        console.log("✅ Subscription created:", subscription);
+      } else {
+        console.log("✅ Using existing subscription");
+      }
+
+      // ✅ CRITICAL: Send to YOUR backend, not the socket server
+      const backendUrl =
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+      const response = await fetch(
+        `${backendUrl}/api/subscribe-notifications`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            subscription,
+            userId: user.id,
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(`Failed to save subscription: ${error}`);
+      }
+
+      const result = await response.json();
+      console.log("✅ Subscription saved to backend:", result);
+
+      setNotificationsEnabled(true);
+      setAudioUnlocked(true);
+      alert("Notifications enabled! 🎉");
+
+      // Play test sound
+      audioRef.current?.play().catch(() => {});
+    } catch (error: unknown) {
+      console.error("❌ Error enabling notifications:", error);
+      const message =
+        error instanceof Error
+          ? error.message
+          : typeof error === "string"
+          ? error
+          : JSON.stringify(error);
+      alert(`Failed to enable notifications: ${message}`);
+    }
   };
+
+  function urlBase64ToUint8Array(base64String: string) {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding)
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+
+    const rawData = atob(base64);
+    return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+  }
+
+  // ✅ Check notification permission on mount
+  useEffect(() => {
+    if (typeof window !== "undefined" && "Notification" in window) {
+      const isEnabled = Notification.permission === "granted";
+      setNotificationsEnabled(isEnabled);
+      console.log(`🔔 Notification permission: ${Notification.permission}`);
+
+      if (isEnabled) {
+        // Check if we have a subscription
+        if ("serviceWorker" in navigator) {
+          navigator.serviceWorker.ready.then(async (reg) => {
+            const subscription = await reg.pushManager.getSubscription();
+            if (subscription) {
+              console.log("✅ Push subscription exists");
+            } else {
+              console.log(
+                "⚠️ Notification permission granted but no push subscription"
+              );
+            }
+          });
+        }
+      }
+    }
+  }, []);
 
   // Fetch appointments once when user is available
   useEffect(() => {
@@ -169,12 +278,17 @@ export default function FirstPage() {
   useEffect(() => {
     if (!user?.id) return;
 
-    // ✅ USE socketManager to connect
-    const socket = socketManager.connect(user.id,process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "https://shadmanov-socket.onrender.com");
+    const socket = socketManager.connect(
+      user.id,
+      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL ||
+        "https://shadmanov-socket.onrender.com"
+    );
 
     // Set up event listeners
     const handleNewAppointment = (appointment: any) => {
       console.log("📅 New appointment received:", appointment);
+      console.log("   🔔 Notification permission:", Notification.permission);
+      console.log("   🔊 Audio unlocked:", audioUnlocked);
 
       setAppointments((prev) => {
         const exists = prev.some((a) => a._id === appointment._id);
@@ -182,34 +296,61 @@ export default function FirstPage() {
           console.log("⚠️ Appointment already exists, skipping duplicate");
           return prev;
         }
+        console.log("✅ Adding new appointment to list");
         return [...prev, appointment];
       });
 
+      // Play sound
       if (audioUnlocked && audioRef.current) {
-        audioRef.current.play().catch(() => {});
+        console.log("🔊 Playing notification sound");
+        audioRef.current.play().catch((e) => {
+          console.error("❌ Failed to play sound:", e);
+        });
+      } else {
+        console.log("⚠️ Audio not unlocked, skipping sound");
       }
 
+      // ✅ Show browser notification (this is for display, push notifications come from server)
       if (Notification.permission === "granted") {
-        new Notification("New Appointment", {
-          body: `Appointment on ${new Date(
-            appointment.scheduledAt
-          ).toLocaleString()}`,
-          icon: "/favicon.avif",
-        });
+        console.log("🔔 Showing browser notification");
+        try {
+          new Notification("New Appointment", {
+            body: `Appointment on ${new Date(
+              appointment.scheduledAt
+            ).toLocaleString()}`,
+            icon: "/favicon.avif",
+            tag: appointment._id,
+          });
+        } catch (e) {
+          console.error("❌ Failed to show notification:", e);
+        }
+      } else {
+        console.log("⚠️ No notification permission, skipping notification");
       }
     };
 
     const handleAppointmentUpdated = (updated: any) => {
       console.log("📝 Appointment updated:", updated);
       setAppointments((prev) =>
-        prev.map((a) => (a._id === updated._id ? updated : a))
+        prev.map((a) => {
+          if (a._id === updated._id) {
+            // Merge the update with existing data to preserve populated fields
+            return {
+              ...a,
+              ...updated,
+              // Preserve createdBy if it's already populated
+              createdBy: updated.createdBy || a.createdBy,
+              createdByName: updated.createdByName || a.createdByName,
+            };
+          }
+          return a;
+        })
       );
     };
 
     socket.on("newAppointment", handleNewAppointment);
     socket.on("appointment:updated", handleAppointmentUpdated);
 
-    // Cleanup: remove listeners but don't disconnect (singleton manages lifecycle)
     return () => {
       socket.off("newAppointment", handleNewAppointment);
       socket.off("appointment:updated", handleAppointmentUpdated);
@@ -225,6 +366,13 @@ export default function FirstPage() {
     setLoading(true);
 
     try {
+      console.log("🚀 Creating appointment...");
+      console.log(
+        "   Selected users:",
+        selectedUsers.map((u) => u.name)
+      );
+      console.log("   Scheduled at:", startDate?.toISOString());
+
       const res = await fetch("/api/appointments", {
         method: "POST",
         credentials: "include",
@@ -235,19 +383,29 @@ export default function FirstPage() {
         }),
       });
 
-      if (!res.ok) throw new Error("Failed to create appointment");
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("❌ Failed to create appointment:", errorText);
+        throw new Error("Failed to create appointment: " + errorText);
+      }
 
       const newAppointment = await res.json();
-      
+      console.log("✅ Appointment created:", newAppointment);
+
       // ✅ Check for duplicates before adding
       setAppointments((prev) => {
         const exists = prev.some((a) => a._id === newAppointment._id);
-        if (exists) return prev;
+        if (exists) {
+          console.log("⚠️ Appointment already in list");
+          return prev;
+        }
+        console.log("✅ Adding appointment to local list");
         return [...prev, newAppointment];
       });
 
       router.push(`/meeting/${newAppointment._id}`);
     } catch (err: any) {
+      console.error("❌ Error creating appointment:", err);
       alert(err.message);
     } finally {
       setLoading(false);
@@ -314,17 +472,19 @@ export default function FirstPage() {
 
   return (
     <div className="block bg-white font-sans">
-      {isClient && !notificationsEnabled && (
-        <div className="mt-5 ml-4 md:ml-16">
-          <button
-            onClick={() => {
-              handleEnableNotifications();
-              unlockAudio();
-            }}
-            className="bg-blue-600 text-white px-4 py-2 rounded-xl"
-          >
-            Enable Notifications & Sounds
-          </button>
+      {isClient && (
+        <div className="mt-5 ml-4 md:ml-16 flex gap-3">
+          {!notificationsEnabled && (
+            <button
+              onClick={() => {
+                handleEnableNotifications();
+                unlockAudio();
+              }}
+              className="bg-blue-600 text-white px-4 py-2 rounded-xl"
+            >
+              Enable Notifications & Sounds
+            </button>
+          )}
         </div>
       )}
 
@@ -385,48 +545,63 @@ export default function FirstPage() {
               : "max-h-0 opacity-0"
           }`}
         >
-          {appointments.map((a) => (
-            <div key={a._id} className="border p-2 my-2 rounded-lg shadow">
-              {a.scheduledAt ? (
-                <>
-                  📅 {new Date(a.scheduledAt).toLocaleDateString()} ⏰{" "}
-                  {new Date(a.scheduledAt).toLocaleTimeString()}
-                </>
-              ) : (
-                <>
-                  📅 {a.date || "Unknown"} ⏰ {a.time || "Unknown"}
-                </>
-              )}
-              <br />
-              <b>Status:</b> {a.status} <br />
-              <b>Created by:</b> {a.createdBy}
-              {a.status === "pending" && a.withUserId?.includes(user?.id) && (
-                <div className="flex gap-2 mt-2">
-                  <button
-                    className="bg-green-500 text-white px-3 py-1 rounded"
-                    onClick={() => handleResponse(a._id, "accepted")}
-                  >
-                    Accept
-                  </button>
-                  <button
-                    className="bg-red-500 text-white px-3 py-1 rounded"
-                    onClick={() => handleResponse(a._id, "declined")}
-                  >
-                    Decline
-                  </button>
-                </div>
-              )}
-              {a.status === "accepted" && (
-                <div className="mt-3">
-                  <EnterRoomButton
-                    currentUserId={user?.id!}
-                    appointment={a}
-                    router={router}
-                  />
-                </div>
-              )}
-            </div>
-          ))}
+          {appointments.map((a) => {
+            // Extract creator name from populated data or string
+            const creatorName =
+              a.createdBy?.name ||
+              a.createdBy?.username ||
+              a.createdBy?.email ||
+              "Unknown";
+            const participants =
+              a.withUserId?.map((u: any) => u.name || u.username || u.email) ||
+              [];
+            return (
+              <div key={a._id} className="border p-2 my-2 rounded-lg shadow">
+                {a.scheduledAt ? (
+                  <>
+                    📅 {new Date(a.scheduledAt).toLocaleDateString()} ⏰{" "}
+                    {new Date(a.scheduledAt).toLocaleTimeString()}
+                  </>
+                ) : (
+                  <>
+                    📅 {a.date || "Unknown"} ⏰ {a.time || "Unknown"}
+                  </>
+                )}
+                <br />
+                <b>Status:</b> {a.status} <br />
+                <b>Created by:</b> {creatorName} <br />
+                <b>Participants: {participants.join(",")}</b>
+                {a.status === "pending" &&
+                  a.withUserId?.some(
+                    (u: any) => u.id === user?.id || u._id === user?.id
+                  ) && (
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        className="bg-green-500 text-white px-3 py-1 rounded"
+                        onClick={() => handleResponse(a._id, "accepted")}
+                      >
+                        Accept
+                      </button>
+                      <button
+                        className="bg-red-500 text-white px-3 py-1 rounded"
+                        onClick={() => handleResponse(a._id, "declined")}
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  )}
+                {a.status === "accepted" && (
+                  <div className="mt-3">
+                    <EnterRoomButton
+                      currentUserId={user?.id!}
+                      appointment={a}
+                      router={router}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -508,11 +683,9 @@ export default function FirstPage() {
         )}
       </div>
       <footer className="fixed select-none bottom-0 right-0 text-gray-400">
-        <p>
-          @ 2025 Shadmanov. All Rights Reserved.
-        </p>
+        <p>@ 2025 Shadmanov. All Rights Reserved.</p>
       </footer>
-    </div>   
+    </div>
   );
 }
 
@@ -578,6 +751,5 @@ function EnterRoomButton({ appointment, router }: any) {
         <p className="text-sm text-red-500">{status.reason}</p>
       )}
     </div>
-    
   );
 }

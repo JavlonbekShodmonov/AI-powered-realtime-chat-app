@@ -49,15 +49,16 @@ export async function GET(
     }
 
     // 4. Verify user is a participant
-    const participants = [
-      appointment.createdBy,
-      ...(appointment.withUserId || []),
-    ];
-    
-    if (!participants.includes(userId)) {
-      console.error("❌ User not a participant:", userId);
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+   const participants = [
+  appointment.createdBy.toString(),
+  ...(appointment.withUserId?.map((id: any) => id.toString()) || []),
+];
+
+if (!participants.includes(userId.toString())) {
+  console.error("❌ User not a participant:", userId);
+  return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+}
+
 
     // 5. Check scheduled time FIRST
     const now = new Date();

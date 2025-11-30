@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import dbConnect from "@/lib/dbConnect";
 import Appointment from "../models/Appointment";
 import { auth } from "../../../lib/auth";
+import { User } from "../models/User";
 
 // CREATE appointment
 export async function POST(req: Request) {
@@ -20,58 +21,112 @@ export async function POST(req: Request) {
 
     await appointment.save();
 
-    // ✅ Emit to socket server on port 3001 for real-time updates
+    console.log("📅 Appointment created:", appointment._id);
+
+    // ✅ Fetch creator info separately to avoid serialization issues
+    let creatorName = "Unknown";
+    let withUserNames: string[] = [];
+
     try {
-      const socketUrl = process.env.SOCKET_SERVER_URL || 'http://localhost:3001';
-      const response = await fetch(`${socketUrl}/api/emit-appointment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          _id: appointment._id.toString(),
-          createdBy: appointment.createdBy,
-          withUserId: appointment.withUserId,
-          scheduledAt: appointment.scheduledAt,
-          status: appointment.status,
-          date: appointment.date,
-          time: appointment.time,
-        }),
-      });
-      
-      if (response.ok) {
-        console.log('✅ Appointment emitted to socket server');
-      } else {
-        console.warn('⚠️ Socket server returned non-OK status:', response.status);
+      // Get creator info
+      const creator = await User.findById(userId).select("username email name");
+      if (creator) {
+        creatorName = creator.name || creator.username || creator.email;
       }
-    } catch (emitError) {
-      console.error('❌ Failed to emit appointment to socket:', emitError);
+
+      // Get participant names
+      if (Array.isArray(withUserId)) {
+        const users = await User.find({ _id: { $in: withUserId } }).select(
+          "username email name"
+        );
+        withUserNames = users.map((u: any) => u.name || u.username || u.email);
+      }
+    } catch (userError) {
+      console.error("⚠️ Error fetching user names:", userError);
     }
 
-    return NextResponse.json(appointment, { status: 201 });
+    console.log("   Creator:", creatorName);
+    console.log("   Participants:", withUserNames);
+
+    // ✅ Emit to socket server with creator name
+    try {
+      const socketUrl =
+        process.env.SOCKET_SERVER_URL || "http://localhost:3001";
+      console.log(`🔌 Sending appointment to socket server: ${socketUrl}`);
+
+      const socketPayload = {
+        _id: appointment._id.toString(),
+        createdBy: appointment.createdBy.toString(),
+        createdByName: creatorName,
+        withUserId: Array.isArray(appointment.withUserId)
+          ? appointment.withUserId.map((id: any) => id.toString())
+          : [appointment.withUserId.toString()],
+        withUserNames: withUserNames,
+        scheduledAt: appointment.scheduledAt,
+        status: appointment.status,
+        date: appointment.date,
+        time: appointment.time,
+      };
+
+      console.log("   Payload:", JSON.stringify(socketPayload, null, 2));
+
+      const response = await fetch(`${socketUrl}/api/emit-appointment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(socketPayload),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log("✅ Appointment emitted to socket server:", result);
+      } else {
+        const errorText = await response.text();
+        console.error(
+          "❌ Socket server returned error:",
+          response.status,
+          errorText
+        );
+      }
+    } catch (emitError) {
+      console.error("❌ Failed to emit appointment to socket:", emitError);
+      // Don't fail the appointment creation if notification fails
+    }
+    await appointment.save();
+    // Return populated appointment for the response
+    await appointment.populate("createdBy", "username email name");
+    await appointment.populate("withUserId", "username email name");
+
+    const appointmentObj = appointment.toObject();
+    return NextResponse.json(appointmentObj, { status: 201 });
   } catch (error) {
-    console.error(error);
+    console.error("Error creating appointment:", error);
     return new NextResponse("Failed to create appointment", { status: 500 });
   }
 }
 
 // GET all appointments for logged-in user
 export async function GET(req: Request) {
-  const { userId } = await auth(req); // ✅ pass req here
-  console.log("Auth debug: ", { userId });
-  if (!userId) return new NextResponse("Unauthorized", { status: 401 });
+  try {
+    const { userId } = await auth(req);
+    console.log("Auth debug: ", { userId });
+    if (!userId) return new NextResponse("Unauthorized", { status: 401 });
 
-  await dbConnect();
-  const appointments = await Appointment.find({
-    $or: [
-      { createdBy: userId },
-      { withUserId: { $in: [userId] } },
-    ],
-  })
-    .populate("createdBy", "username email")
-    .populate("withUserId", "username email");
+    await dbConnect();
+    const appointments = await Appointment.find({
+      $or: [{ createdBy: userId }, { withUserId: { $in: [userId] } }],
+    })
+      .populate("createdBy", "name username email")
+      .populate("withUserId", "name username email");
 
-  return NextResponse.json(appointments, { status: 200 });
+    return NextResponse.json(
+      appointments.map((a) => a.toObject()),
+      { status: 200 }
+    );
+  } catch (error) {
+    console.error("Error fetching appointments:", error);
+    return new NextResponse("Failed to fetch appointments", { status: 500 });
+  }
 }
-
 
 // UPDATE appointment
 export async function PATCH(req: Request) {
@@ -91,29 +146,81 @@ export async function PATCH(req: Request) {
 
     await appointment.save();
 
-    // ✅ Emit update to socket server
+    console.log("📝 Appointment updated:", appointmentId, "->", status);
+
+    // ✅ Fetch user info separately
+    let creatorName = "Unknown";
+    let withUserNames: string[] = [];
+
     try {
-      const socketUrl = process.env.SOCKET_SERVER_URL || 'http://localhost:3001';
-      await fetch(`${socketUrl}/api/emit-appointment-update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          _id: appointment._id.toString(),
-          createdBy: appointment.createdBy,
-          withUserId: appointment.withUserId,
-          scheduledAt: appointment.scheduledAt,
-          status: appointment.status,
-          date: appointment.date,
-          time: appointment.time,
-        }),
-      });
-    } catch (emitError) {
-      console.error('❌ Failed to emit update to socket:', emitError);
+      const creator = await User.findById(appointment.createdBy).select(
+        "username email name"
+      );
+      if (creator) {
+        creatorName = creator.name || creator.username || creator.email;
+      }
+
+      if (Array.isArray(appointment.withUserId)) {
+        const users = await User.find({
+          _id: { $in: appointment.withUserId },
+        }).select("username email name");
+        withUserNames = users.map((u: any) => u.name || u.username || u.email);
+      }
+    } catch (userError) {
+      console.error("⚠️ Error fetching user names:", userError);
     }
+
+    // ✅ Emit update to socket server with names
+    try {
+      const socketUrl =
+        process.env.SOCKET_SERVER_URL || "http://localhost:3001";
+      console.log(
+        `🔌 Sending appointment update to socket server: ${socketUrl}`
+      );
+
+      const socketPayload = {
+        _id: appointment._id.toString(),
+        createdBy: appointment.createdBy.toString(),
+        createdByName: creatorName,
+        withUserId: Array.isArray(appointment.withUserId)
+          ? appointment.withUserId.map((id: any) => id.toString())
+          : [appointment.withUserId.toString()],
+        withUserNames: withUserNames,
+        scheduledAt: appointment.scheduledAt,
+        status: appointment.status,
+        date: appointment.date,
+        time: appointment.time,
+      };
+
+      const response = await fetch(`${socketUrl}/api/emit-appointment-update`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(socketPayload),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log("✅ Appointment update emitted to socket server:", result);
+      } else {
+        const errorText = await response.text();
+        console.error(
+          "❌ Socket server returned error:",
+          response.status,
+          errorText
+        );
+      }
+    } catch (emitError) {
+      console.error("❌ Failed to emit update to socket:", emitError);
+      // Don't fail the update if notification fails
+    }
+
+    // Populate for response
+    await appointment.populate("createdBy", "name username email");
+    await appointment.populate("withUserId", "name username email");
 
     return NextResponse.json(appointment, { status: 200 });
   } catch (error) {
-    console.error(error);
+    console.error("Error updating appointment:", error);
     return new NextResponse("Failed to update appointment", { status: 500 });
   }
 }
@@ -138,7 +245,7 @@ export async function DELETE(req: Request) {
     await appointment.deleteOne();
     return new NextResponse("Deleted", { status: 200 });
   } catch (error) {
-    console.error(error);
+    console.error("Error deleting appointment:", error);
     return new NextResponse("Failed to delete appointment", { status: 500 });
   }
 }
