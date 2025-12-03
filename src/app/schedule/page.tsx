@@ -666,9 +666,6 @@ export default function FirstPage() {
                       )}
                       <span className="relative z-10">
                         <strong>{user.name}</strong>{" "}
-                        <span className="text-gray-400 text-sm">
-                          ({user.email})
-                        </span>
                       </span>
                     </button>
                   </li>
