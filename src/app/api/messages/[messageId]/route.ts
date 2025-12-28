@@ -23,7 +23,7 @@ export async function PATCH(
     );
   }
 
-  const { message, messagesCollection, error, status } = await getMessageById(
+  const { message, messagesCollection, error, status } = await GET(
     params.id,
     userId
   );
@@ -40,7 +40,7 @@ export async function PATCH(
   return NextResponse.json({ message: "message updated" });
 }
 
-export async function getMessageById(id: string, userId: string) {
+export async function GET(id: string, userId: string) {
   const MongoClient = await clientPromise;
   const db = MongoClient.db();
   const messagesCollection = db.collection("messages");
@@ -69,7 +69,7 @@ export async function DELETE(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { message, messagesCollection, error, status } = await getMessageById(
+  const { message, messagesCollection, error, status } = await GET(
     params.id,
     userId
   );
