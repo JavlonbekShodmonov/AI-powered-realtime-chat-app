@@ -6,24 +6,24 @@ const messageSchema = new Schema({
     required: true,
     trim: true,
   },
-    sender: {
+  sender: {
     type: Schema.Types.ObjectId,
     ref: "User",
     required: true,
-    },
-    receiver: {
+  },
+  receiver: {
     type: Schema.Types.ObjectId,
     ref: "User",
     required: true,
-    },
-    timestamp: {
+  },
+  timestamp: {
     type: Date,
     default: Date.now,
-    },
-    isRead: {
+  },
+  isRead: {
     type: Boolean,
     default: false,
-    },
-},);
+  },
+});
 
 export const Message = mongoose.model("Message", messageSchema);

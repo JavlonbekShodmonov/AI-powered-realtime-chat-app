@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import { canEnterRoom } from "../utils/roomApi";
 import { useSession } from "next-auth/react";
 import { socketManager } from "../utils/socketClient";
+import { useLocale } from "../components/provider/locale-provider";
+import { Calendar, Clock, Users, Bell, Search, Plus, Check, X, ChevronDown, ChevronUp, Video } from "lucide-react";
 
 type UserType = {
   id: string;
@@ -15,7 +17,7 @@ type UserType = {
 };
 
 export default function FirstPage() {
-  const [showAppointments, setShowAppointments] = useState(false);
+  const [showAppointments, setShowAppointments] = useState(true);
   const [showUsers, setShowUsers] = useState(false);
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
@@ -30,7 +32,6 @@ export default function FirstPage() {
   const router = useRouter();
   const [appointments, setAppointments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
   const [isClient, setIsClient] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [audioUnlocked, setAudioUnlocked] = useState(false);
@@ -38,6 +39,7 @@ export default function FirstPage() {
   const [isSearching, setIsSearching] = useState(false);
   const publicKey = process.env.NEXT_PUBLIC_PUBLIC_KEY;
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const { locale } = useLocale();
 
   const handleSearch = async (query: string) => {
     setSearchTerm(query);
@@ -51,18 +53,11 @@ export default function FirstPage() {
     setIsSearching(true);
 
     try {
-      const res = await fetch(
-        `/api/get-users?search=${encodeURIComponent(query)}`
-      );
+      const res = await fetch(`/api/get-users?search=${encodeURIComponent(query)}`);
       if (!res.ok) throw new Error("Failed to search users");
 
       const data: UserType[] = await res.json();
-
-      if (data && data.length > 0) {
-        setUsers(data);
-      } else {
-        setUsers([]);
-      }
+      setUsers(data.length > 0 ? data : []);
     } catch (err) {
       console.error("Search error:", err);
       setUsers([]);
@@ -71,67 +66,24 @@ export default function FirstPage() {
     }
   };
 
-  // ✅ Setup audio once on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
       audioRef.current = new Audio("/notification.mp3");
       setIsClient(true);
-
-      // Check if service worker is registered
-      if ("serviceWorker" in navigator) {
-        navigator.serviceWorker.getRegistration().then((reg) => {
-          if (reg) {
-            console.log("✅ Service worker already registered:", reg.scope);
-          } else {
-            console.log("⚠️ No service worker registered yet");
-          }
-        });
-      }
     }
   }, []);
 
   const unlockAudio = () => {
-    audioRef.current
-      ?.play()
-      .then(() => {
-        audioRef.current?.pause();
-        audioRef.current!.currentTime = 0;
-        setAudioUnlocked(true);
-      })
-      .catch(() => {});
+    audioRef.current?.play().then(() => {
+      audioRef.current?.pause();
+      audioRef.current!.currentTime = 0;
+      setAudioUnlocked(true);
+    }).catch(() => {});
   };
 
-  function playNotificationSound() {
-    if (audioUnlocked && audioRef.current) {
-      audioRef.current.play().catch(() => {});
-    }
-  }
-
-  const handleFetchUsers = async () => {
-    if (!isSignedIn) {
-      alert("Not signed in");
-      return;
-    }
-    try {
-      const response = await fetch("/api/get-users");
-      if (!response.ok) throw new Error("Failed to fetch users");
-      const data: UserType[] = await response.json();
-      setUsers(data);
-      setShowUsers(true);
-    } catch (err: any) {
-      setError(err.message);
-    }
-  };
-
-  // ✅ FIXED: Proper notification setup with subscription
   const handleEnableNotifications = async () => {
     if (!("Notification" in window)) {
       alert("This browser does not support notifications.");
-      return;
-    }
-
-    if (!("serviceWorker" in navigator)) {
-      alert("This browser does not support service workers.");
       return;
     }
 
@@ -141,117 +93,57 @@ export default function FirstPage() {
     }
 
     try {
-      // Request notification permission
       const permission = await Notification.requestPermission();
-
       if (permission !== "granted") {
         alert("Notification permission denied");
         return;
       }
 
-      console.log("🔔 Permission granted, registering service worker...");
-
-      // Register service worker
       const registration = await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
 
-      console.log("✅ Service worker registered");
-
-      // Check if already subscribed
       let subscription = await registration.pushManager.getSubscription();
 
       if (!subscription) {
-        console.log("📝 Creating new push subscription...");
-        // Subscribe to push notifications
         subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
           applicationServerKey: urlBase64ToUint8Array(publicKey || ""),
         });
-        console.log("✅ Subscription created:", subscription);
-      } else {
-        console.log("✅ Using existing subscription");
       }
 
-      // ✅ CRITICAL: Send to YOUR backend, not the socket server
-      const backendUrl =
-        process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
-      const response = await fetch(
-        `${backendUrl}/api/subscribe-notifications`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            subscription,
-            userId: user.id,
-          }),
-        }
-      );
+      const backendUrl = process.env.NEXT_PUBLIC_API_URL || "https://shadmanov.onrender.com";
+      const response = await fetch(`${backendUrl}/api/subscribe-notifications`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ subscription, userId: user.id }),
+      });
 
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Failed to save subscription: ${error}`);
-      }
-
-      const result = await response.json();
-      console.log("✅ Subscription saved to backend:", result);
+      if (!response.ok) throw new Error("Failed to save subscription");
 
       setNotificationsEnabled(true);
       setAudioUnlocked(true);
       alert("Notifications enabled! 🎉");
-
-      // Play test sound
       audioRef.current?.play().catch(() => {});
     } catch (error: unknown) {
       console.error("❌ Error enabling notifications:", error);
-      const message =
-        error instanceof Error
-          ? error.message
-          : typeof error === "string"
-          ? error
-          : JSON.stringify(error);
-      alert(`Failed to enable notifications: ${message}`);
+      alert(`Failed to enable notifications: ${error instanceof Error ? error.message : "Unknown error"}`);
     }
   };
 
   function urlBase64ToUint8Array(base64String: string) {
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding)
-      .replace(/-/g, "+")
-      .replace(/_/g, "/");
-
+    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
     const rawData = atob(base64);
     return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
   }
 
-  // ✅ Check notification permission on mount
   useEffect(() => {
     if (typeof window !== "undefined" && "Notification" in window) {
-      const isEnabled = Notification.permission === "granted";
-      setNotificationsEnabled(isEnabled);
-      console.log(`🔔 Notification permission: ${Notification.permission}`);
-
-      if (isEnabled) {
-        // Check if we have a subscription
-        if ("serviceWorker" in navigator) {
-          navigator.serviceWorker.ready.then(async (reg) => {
-            const subscription = await reg.pushManager.getSubscription();
-            if (subscription) {
-              console.log("✅ Push subscription exists");
-            } else {
-              console.log(
-                "⚠️ Notification permission granted but no push subscription"
-              );
-            }
-          });
-        }
-      }
+      setNotificationsEnabled(Notification.permission === "granted");
     }
   }, []);
 
-  // Fetch appointments once when user is available
   useEffect(() => {
     if (!user?.id) return;
 
@@ -261,9 +153,7 @@ export default function FirstPage() {
           method: "GET",
           credentials: "include",
         });
-        if (!res.ok) {
-          throw new Error("Failed to fetch appointments: " + res.statusText);
-        }
+        if (!res.ok) throw new Error("Failed to fetch appointments");
         const data = await res.json();
         setAppointments(data);
       } catch (err) {
@@ -274,77 +164,50 @@ export default function FirstPage() {
     fetchAppointments();
   }, [user?.id]);
 
-  // ✅ Socket connection using singleton manager
   useEffect(() => {
     if (!user?.id) return;
 
     const socket = socketManager.connect(
       user.id,
-      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL ||
-        "https://shadmanov-socket.onrender.com"
+      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "https://shadmanov-socket.onrender.com"
     );
 
-    // Set up event listeners
     const handleNewAppointment = (appointment: any) => {
-      console.log("📅 New appointment received:", appointment);
-      console.log("   🔔 Notification permission:", Notification.permission);
-      console.log("   🔊 Audio unlocked:", audioUnlocked);
-
       setAppointments((prev) => {
-        const exists = prev.some((a) => a._id === appointment._id);
-        if (exists) {
-          console.log("⚠️ Appointment already exists, skipping duplicate");
-          return prev;
-        }
-        console.log("✅ Adding new appointment to list");
-        return [...prev, appointment];
+        if (prev.some((a) => a._id === appointment._id)) return prev;
+        
+        const formatted = {
+          _id: appointment._id,
+          scheduledAt: appointment.scheduledAt,
+          status: appointment.status || 'pending',
+          createdBy: {
+            _id: appointment.createdBy,
+            name: appointment.createdByName || "Unknown",
+          },
+          withUserId: appointment.withUserId?.map((uid: string, i: number) => ({
+            _id: uid,
+            name: appointment.withUserNames?.[i] || "Unknown",
+          })) || [],
+        };
+        
+        return [...prev, formatted];
       });
 
-      // Play sound
       if (audioUnlocked && audioRef.current) {
-        console.log("🔊 Playing notification sound");
-        audioRef.current.play().catch((e) => {
-          console.error("❌ Failed to play sound:", e);
-        });
-      } else {
-        console.log("⚠️ Audio not unlocked, skipping sound");
+        audioRef.current.play().catch(() => {});
       }
 
-      // ✅ Show browser notification (this is for display, push notifications come from server)
       if (Notification.permission === "granted") {
-        console.log("🔔 Showing browser notification");
-        try {
-          new Notification("New Appointment", {
-            body: `Appointment on ${new Date(
-              appointment.scheduledAt
-            ).toLocaleString()}`,
-            icon: "/favicon.avif",
-            tag: appointment._id,
-          });
-        } catch (e) {
-          console.error("❌ Failed to show notification:", e);
-        }
-      } else {
-        console.log("⚠️ No notification permission, skipping notification");
+        new Notification("New Appointment", {
+          body: `${appointment.createdByName || "Someone"} scheduled for ${new Date(appointment.scheduledAt).toLocaleString()}`,
+          icon: "/favicon.avif",
+        });
       }
     };
 
     const handleAppointmentUpdated = (updated: any) => {
-      console.log("📝 Appointment updated:", updated);
       setAppointments((prev) =>
-        prev.map((a) => {
-          if (a._id === updated._id) {
-            // Merge the update with existing data to preserve populated fields
-            return {
-              ...a,
-              ...updated,
-              // Preserve createdBy if it's already populated
-              createdBy: updated.createdBy || a.createdBy,
-              createdByName: updated.createdByName || a.createdByName,
-            };
-          }
-          return a;
-        })
+        prev.map((a) => (a._id === updated._id ? { ...a, ...updated } : a))
       );
     };
 
@@ -358,21 +221,14 @@ export default function FirstPage() {
   }, [user?.id, audioUnlocked]);
 
   const handleStartChatAndCreateAppointment = async () => {
-    if (!isReady || !selectedUsers) {
-      alert("Please select a user and a date/time first.");
+    if (!isReady) {
+      alert("Please select users and time first.");
       return;
     }
 
     setLoading(true);
 
     try {
-      console.log("🚀 Creating appointment...");
-      console.log(
-        "   Selected users:",
-        selectedUsers.map((u) => u.name)
-      );
-      console.log("   Scheduled at:", startDate?.toISOString());
-
       const res = await fetch("/api/appointments", {
         method: "POST",
         credentials: "include",
@@ -383,39 +239,25 @@ export default function FirstPage() {
         }),
       });
 
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error("❌ Failed to create appointment:", errorText);
-        throw new Error("Failed to create appointment: " + errorText);
-      }
+      if (!res.ok) throw new Error("Failed to create appointment");
 
       const newAppointment = await res.json();
-      console.log("✅ Appointment created:", newAppointment);
-
-      // ✅ Check for duplicates before adding
+      
       setAppointments((prev) => {
-        const exists = prev.some((a) => a._id === newAppointment._id);
-        if (exists) {
-          console.log("⚠️ Appointment already in list");
-          return prev;
-        }
-        console.log("✅ Adding appointment to local list");
+        if (prev.some((a) => a._id === newAppointment._id)) return prev;
         return [...prev, newAppointment];
       });
 
       router.push(`/meeting/${newAppointment._id}`);
     } catch (err: any) {
-      console.error("❌ Error creating appointment:", err);
+      console.error("Error:", err);
       alert(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleResponse = async (
-    appointmentId: string,
-    newStatus: "accepted" | "declined"
-  ) => {
+  const handleResponse = async (appointmentId: string, newStatus: "accepted" | "declined") => {
     try {
       const res = await fetch("/api/appointments", {
         method: "PATCH",
@@ -424,296 +266,279 @@ export default function FirstPage() {
         body: JSON.stringify({ appointmentId, status: newStatus }),
       });
 
-      if (!res.ok) throw new Error("Failed to update appointment");
+      if (!res.ok) throw new Error("Failed to update");
 
       const updated = await res.json();
-      setAppointments((prev) =>
-        prev.map((a) => (a._id === updated._id ? updated : a))
-      );
+      setAppointments((prev) => prev.map((a) => (a._id === updated._id ? updated : a)));
     } catch (err) {
-      console.error("Error updating appointment:", err);
+      console.error("Error:", err);
     }
   };
-
-  const getMinMaxTime = () => {
-    if (!startDate) {
-      return {
-        minTime: new Date(),
-        maxTime: new Date(new Date().setHours(23, 59, 59, 999)),
-      };
-    }
-
-    const today = new Date();
-    const selectedDay = new Date(startDate);
-
-    const isToday =
-      selectedDay.getDate() === today.getDate() &&
-      selectedDay.getMonth() === today.getMonth() &&
-      selectedDay.getFullYear() === today.getFullYear();
-
-    if (isToday) {
-      return {
-        minTime: new Date(),
-        maxTime: new Date(new Date().setHours(23, 59, 59, 999)),
-      };
-    } else {
-      return {
-        minTime: new Date(new Date().setHours(0, 0, 0, 0)),
-        maxTime: new Date(new Date().setHours(23, 59, 59, 999)),
-      };
-    }
-  };
-
-  const { minTime, maxTime } = getMinMaxTime();
-
-  const filteredUsers = users.filter((u) =>
-    u.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
   return (
-    <div className="block bg-white font-sans">
-      {isClient && (
-        <div className="mt-5 ml-4 md:ml-16 flex gap-3">
-          {!notificationsEnabled && (
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+      {/* Header */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+          <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
+            {locale === 'ru' ? 'Планировщик встреч' : 'Meeting Scheduler'}
+          </h1>
+          
+          {isClient && !notificationsEnabled && (
             <button
               onClick={() => {
                 handleEnableNotifications();
                 unlockAudio();
               }}
-              className="bg-blue-600 text-white px-4 py-2 rounded-xl"
+              className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-2 rounded-xl hover:shadow-lg transition-all duration-300"
             >
-              Enable Notifications & Sounds
+              <Bell className="w-4 h-4" />
+              {locale === 'ru' ? 'Включить уведомления' : 'Enable Notifications'}
             </button>
           )}
         </div>
-      )}
-
-      <div className="flex flex-col md:flex-row justify-around w-full mt-5 text-black font-semibold text-xs md:text-sm gap-3 px-4">
-        <button
-          className="w-full md:w-40 bg-black/90 border border-white/10 hover:border-white/20 transition-all duration-300 backdrop-blur-sm relative overflow-hidden rounded-lg p-2"
-          onClick={() => setShowCalendar(!showCalendar)}
-        >
-          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-40 pointer-events-none"></div>
-          <span className="relative z-10 text-white">Calendar</span>
-        </button>
-
-        <div className="w-full md:w-fit bg-black/90 border border-white/10 hover:border-white/20 transition-all duration-300 backdrop-blur-sm relative overflow-hidden rounded-lg p-2 text-center">
-          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-40 pointer-events-none"></div>
-          <span className="relative z-10 text-white break-words">
-            set time: {startDate ? startDate.toLocaleString() : "none"} with{" "}
-            {selectedUsers.length
-              ? selectedUsers.map((u) => u.name).join(", ")
-              : "no one"}
-          </span>
-        </div>
       </div>
 
-      <div className="mt-6 ml-4 md:ml-16 px-4 md:px-0">
-        <div className="justify-items-center mr-0 md:mr-96 md:pr-96 mt-10">
-          <div className="w-0 h-0 border-l-[10px] border-r-[10px] border-b-[10px] border-l-transparent border-r-transparent border-b-black"></div>
-          <h2 className="font-light text-base md:text-xl uppercase text-center">
-            click Calendar to pick a time
+      <div className="max-w-7xl mx-auto px-4 py-8">
+        {/* Create Meeting Card */}
+        <div className="bg-white rounded-2xl shadow-xl border-2 border-indigo-100 p-6 mb-8">
+          <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
+            <Plus className="w-5 h-5 text-indigo-600" />
+            {locale === 'ru' ? 'Создать новую встречу' : 'Create New Meeting'}
           </h2>
-        </div>
-        {showCalendar && (
-          <div className="mt-4 ml-4 md:ml-16 flex justify-center md:justify-start">
-            <DatePicker
-              selected={startDate}
-              onChange={(date) => setStartDate(date)}
-              showTimeSelect
-              minDate={new Date()}
-              minTime={minTime}
-              maxTime={maxTime}
-              timeIntervals={1}
-              placeholderText="Select date and time"
-              dateFormat="Pp"
-              inline
-            />
-          </div>
-        )}
-        <h2
-          className="text-lg font-semibold cursor-pointer select-none"
-          onClick={() => setShowAppointments((prev) => !prev)}
-        >
-          Your Appointments {showAppointments ? "▲" : "▼"}
-        </h2>
 
-        <div
-          className={`max-h-52 overflow-scroll transition-all duration-500 ease-in-out ${
-            showAppointments
-              ? "max-h-[1000px] opacity-100"
-              : "max-h-0 opacity-0"
-          }`}
-        >
-          {appointments.map((a) => {
-            // Extract creator name from populated data or string
-            const creatorName =
-              a.createdBy?.name ||
-              a.createdBy?.username ||
-              a.createdBy?.email ||
-              "Unknown";
-            const participants =
-              a.withUserId?.map((u: any) => u.name || u.username || u.email) ||
-              [];
-            return (
-              <div key={a._id} className="border p-2 my-2 rounded-lg shadow">
-                {a.scheduledAt ? (
-                  <>
-                    📅 {new Date(a.scheduledAt).toLocaleDateString()} ⏰{" "}
-                    {new Date(a.scheduledAt).toLocaleTimeString()}
-                  </>
-                ) : (
-                  <>
-                    📅 {a.date || "Unknown"} ⏰ {a.time || "Unknown"}
-                  </>
-                )}
-                <br />
-                <b>Status:</b> {a.status} <br />
-                <b>Created by:</b> {creatorName} <br />
-                <b>Participants: {participants.join(",")}</b>
-                {a.status === "pending" &&
-                  a.withUserId?.some(
-                    (u: any) => u.id === user?.id || u._id === user?.id
-                  ) && (
-                    <div className="flex gap-2 mt-2">
-                      <button
-                        className="bg-green-500 text-white px-3 py-1 rounded"
-                        onClick={() => handleResponse(a._id, "accepted")}
-                      >
-                        Accept
-                      </button>
-                      <button
-                        className="bg-red-500 text-white px-3 py-1 rounded"
-                        onClick={() => handleResponse(a._id, "declined")}
-                      >
-                        Decline
-                      </button>
-                    </div>
-                  )}
-                {a.status === "accepted" && (
-                  <div className="mt-3">
-                    <EnterRoomButton
-                      currentUserId={user?.id!}
-                      appointment={a}
-                      router={router}
+          <div className="grid md:grid-cols-2 gap-6">
+            {/* Date/Time Section */}
+            <div>
+              <button
+                onClick={() => setShowCalendar(!showCalendar)}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:shadow-lg transition-all duration-300 mb-4"
+              >
+                <Calendar className="w-5 h-5" />
+                {locale === 'ru' ? 'Выбрать время' : 'Select Time'}
+              </button>
+
+              {showCalendar && (
+                <div className="border-2 border-indigo-100 rounded-xl p-4 bg-gray-50">
+                  <DatePicker
+                    selected={startDate}
+                    onChange={(date) => setStartDate(date)}
+                    showTimeSelect
+                    minDate={new Date()}
+                    timeIntervals={15}
+                    dateFormat="Pp"
+                    inline
+                    className="w-full"
+                  />
+                </div>
+              )}
+
+              {startDate && (
+                <div className="mt-4 p-4 bg-indigo-50 rounded-xl border-2 border-indigo-200">
+                  <div className="flex items-center gap-2 text-indigo-700 font-medium">
+                    <Clock className="w-5 h-5" />
+                    {startDate.toLocaleString()}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Users Section */}
+            <div>
+              <button
+                onClick={() => setShowUsers(!showUsers)}
+                className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-xl hover:shadow-lg transition-all duration-300 mb-4"
+              >
+                <Users className="w-5 h-5" />
+                {locale === 'ru' ? 'Выбрать участников' : 'Select Participants'}
+              </button>
+
+              {showUsers && (
+                <div className="border-2 border-purple-100 rounded-xl p-4 bg-gray-50">
+                  <div className="relative mb-4">
+                    <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
+                    <input
+                      type="text"
+                      placeholder={locale === 'ru' ? 'Поиск пользователей...' : 'Search users...'}
+                      value={searchTerm}
+                      onChange={(e) => handleSearch(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border-2 border-gray-200 rounded-lg focus:border-purple-500 focus:outline-none"
                     />
                   </div>
-                )}
-              </div>
-            );
-          })}
+
+                  {isSearching && (
+                    <div className="text-center py-4 text-gray-500">
+                      {locale === 'ru' ? 'Поиск...' : 'Searching...'}
+                    </div>
+                  )}
+
+                  {searchTerm && users.length > 0 && (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {users.map((u) => (
+                        <button
+                          key={u.id}
+                          onClick={() =>
+                            setSelectedUsers((prev) =>
+                              prev.some((p) => p.id === u.id)
+                                ? prev.filter((p) => p.id !== u.id)
+                                : [...prev, u]
+                            )
+                          }
+                          className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
+                            selectedUsers.some((p) => p.id === u.id)
+                              ? 'bg-purple-100 border-purple-500'
+                              : 'bg-white border-gray-200 hover:border-purple-300'
+                          }`}
+                        >
+                          <span className="font-medium">{u.name}</span>
+                          {selectedUsers.some((p) => p.id === u.id) && (
+                            <Check className="w-5 h-5 text-purple-600" />
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {searchTerm && users.length === 0 && !isSearching && (
+                    <p className="text-center text-gray-500 py-4">
+                      {locale === 'ru' ? 'Пользователи не найдены' : 'No users found'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {selectedUsers.length > 0 && (
+                <div className="mt-4 p-4 bg-purple-50 rounded-xl border-2 border-purple-200">
+                  <div className="flex items-center gap-2 text-purple-700 font-medium mb-2">
+                    <Users className="w-5 h-5" />
+                    {locale === 'ru' ? 'Выбрано участников:' : 'Selected:'} {selectedUsers.length}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {selectedUsers.map((u) => (
+                      <span key={u.id} className="bg-white px-3 py-1 rounded-full text-sm border border-purple-300">
+                        {u.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <button
+            disabled={!isReady || loading}
+            onClick={handleStartChatAndCreateAppointment}
+            className={`w-full mt-6 py-4 rounded-xl font-semibold text-white transition-all duration-300 ${
+              isReady
+                ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:shadow-lg hover:scale-[1.02]'
+                : 'bg-gray-300 cursor-not-allowed'
+            }`}
+          >
+            {loading ? (locale === 'ru' ? 'Создание...' : 'Creating...') : (locale === 'ru' ? 'Создать встречу' : 'Create Meeting')}
+          </button>
+        </div>
+
+        {/* Appointments List */}
+        <div className="bg-white rounded-2xl shadow-xl border-2 border-indigo-100 p-6">
+          <button
+            onClick={() => setShowAppointments(!showAppointments)}
+            className="w-full flex items-center justify-between mb-4"
+          >
+            <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+              <Video className="w-5 h-5 text-indigo-600" />
+              {locale === 'ru' ? 'Мои встречи' : 'My Appointments'} ({appointments.length})
+            </h2>
+            {showAppointments ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+          </button>
+
+          {showAppointments && (
+            <div className="space-y-4">
+              {appointments.length === 0 ? (
+                <div className="text-center py-12 text-gray-500">
+                  <Calendar className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+                  <p>{locale === 'ru' ? 'У вас пока нет встреч' : 'No appointments yet'}</p>
+                </div>
+              ) : (
+                appointments.map((a) => (
+                  <div
+                    key={a._id}
+                    className="border-2 border-gray-200 rounded-xl p-4 hover:border-indigo-300 transition-all"
+                  >
+                    <div className="flex items-start justify-between mb-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-gray-700 font-medium mb-1">
+                          <Calendar className="w-4 h-4" />
+                          {new Date(a.scheduledAt).toLocaleDateString()}
+                          <Clock className="w-4 h-4 ml-2" />
+                          {new Date(a.scheduledAt).toLocaleTimeString()}
+                        </div>
+                        <div className="text-sm text-gray-600">
+                          <strong>{locale === 'ru' ? 'Создано:' : 'By:'}</strong> {a.createdBy?.name || 'Unknown'}
+                        </div>
+                      </div>
+                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                        a.status === 'accepted' ? 'bg-green-100 text-green-700' :
+                        a.status === 'declined' ? 'bg-red-100 text-red-700' :
+                        'bg-yellow-100 text-yellow-700'
+                      }`}>
+                        {a.status}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
+                      <Users className="w-4 h-4" />
+                      {a.withUserId?.map((u: any) => u.name).join(', ')}
+                    </div>
+
+                    {a.status === 'pending' && a.withUserId?.some((u: any) => u._id === user?.id) && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleResponse(a._id, 'accepted')}
+                          className="flex-1 bg-green-500 text-white py-2 rounded-lg hover:bg-green-600 transition-colors"
+                        >
+                          <Check className="w-4 h-4 inline mr-1" />
+                          {locale === 'ru' ? 'Принять' : 'Accept'}
+                        </button>
+                        <button
+                          onClick={() => handleResponse(a._id, 'declined')}
+                          className="flex-1 bg-red-500 text-white py-2 rounded-lg hover:bg-red-600 transition-colors"
+                        >
+                          <X className="w-4 h-4 inline mr-1" />
+                          {locale === 'ru' ? 'Отклонить' : 'Decline'}
+                        </button>
+                      </div>
+                    )}
+
+                    {a.status === 'accepted' && (
+                      <EnterRoomButton appointment={a} router={router} locale={locale} />
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       </div>
-
-      <div
-        className={`transition-all duration-500 ease-in-out w-full md:w-fit border-2 ${
-          showUsers ? "h-auto" : "h-fit"
-        } space-y-4 border-slate-600 rounded-2xl p-4 text-center flex flex-col items-center hover:border-white mt-10 justify-self-center self-center mx-4`}
-      >
-        <button
-          onClick={handleFetchUsers}
-          className="bg-black/90 border border-white/10 hover:border-white/20 transition-all duration-300 backdrop-blur-sm relative overflow-hidden text-white px-4 py-2 rounded-xl"
-        >
-          <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-40 pointer-events-none"></div>
-          <span className="relative z-10">Choose whom to chat</span>
-        </button>
-        <button
-          disabled={!isReady || loading}
-          className={`mt-4 px-4 py-2 rounded text-white font-semibold ${
-            isReady
-              ? "bg-green-500 hover:bg-green-600"
-              : "bg-gray-400 cursor-not-allowed"
-          }`}
-          onClick={handleStartChatAndCreateAppointment}
-        >
-          {loading ? "Creating..." : "Create Appointment"}
-        </button>
-
-        {showUsers && (
-          <div className="mt-4 w-full">
-            <h3 className="font-semibold text-lg mb-2">Search for a user:</h3>
-
-            <input
-              type="text"
-              placeholder="Search users..."
-              value={searchTerm}
-              onChange={(e) => handleSearch(e.target.value)}
-              className="border p-2 rounded w-full"
-            />
-
-            {isSearching && <p>Searching...</p>}
-
-            {searchTerm && users.length > 0 && (
-              <ul className="space-y-2 mt-2">
-                {users.map((user) => (
-                  <li key={user.id} className="text-left">
-                    <button
-                      className={`border p-2 rounded w-full ${
-                        selectedUsers.some((u) => u.id === user.id)
-                          ? "bg-black/90 border border-white/10 hover:border-white/20 transition-all duration-300 backdrop-blur-sm relative overflow-hidden text-white"
-                          : "bg-gray-100 hover:bg-black hover:text-white"
-                      }`}
-                      onClick={() =>
-                        setSelectedUsers((prev) =>
-                          prev.some((u) => u.id === user.id)
-                            ? prev.filter((u) => u.id !== user.id)
-                            : [...prev, user]
-                        )
-                      }
-                    >
-                      {selectedUsers.some((u) => u.id === user.id) && (
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-40 pointer-events-none"></div>
-                      )}
-                      <span className="relative z-10">
-                        <strong>{user.name}</strong>{" "}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            {searchTerm && users.length === 0 && !isSearching && (
-              <p className="text-gray-500 italic mt-2">No users found</p>
-            )}
-          </div>
-        )}
-      </div>
-      <footer className="fixed select-none bottom-0 right-0 text-gray-400">
-        <p>@ 2025 Shadmanov. All Rights Reserved.</p>
-      </footer>
     </div>
   );
 }
 
-function EnterRoomButton({ appointment, router }: any) {
-  const [status, setStatus] = React.useState<{
-    allowed: boolean;
-    reason?: string;
-  }>({ allowed: false });
+function EnterRoomButton({ appointment, router, locale }: any) {
+  const [status, setStatus] = React.useState<{ allowed: boolean; reason?: string }>({ allowed: false });
 
   React.useEffect(() => {
-    if (!appointment?._id) {
-      console.warn("No appointment ID provided");
-      return;
-    }
+    if (!appointment?._id) return;
 
     let interval: NodeJS.Timeout | null = null;
     let isMounted = true;
 
     async function check() {
       if (!isMounted) return;
-
       try {
         const res = await canEnterRoom(appointment._id);
-        if (isMounted) {
-          setStatus(res);
-        }
+        if (isMounted) setStatus(res);
       } catch (err) {
-        console.error("Error checking room:", err);
-        if (isMounted) {
-          setStatus({ allowed: false, reason: "Error checking room" });
-        }
+        if (isMounted) setStatus({ allowed: false, reason: "Error" });
       }
     }
 
@@ -727,25 +552,21 @@ function EnterRoomButton({ appointment, router }: any) {
   }, [appointment?._id]);
 
   return (
-    <div className="flex flex-col gap-2">
+    <div>
       <button
         disabled={!status.allowed}
-        onClick={() => {
-          if (status.allowed && appointment?._id) {
-            router.push(`/meeting/${appointment._id}`);
-          }
-        }}
-        className={`px-4 py-2 rounded text-white font-semibold ${
+        onClick={() => status.allowed && router.push(`/meeting/${appointment._id}`)}
+        className={`w-full py-3 rounded-lg font-semibold transition-all ${
           status.allowed
-            ? "bg-green-600 hover:bg-green-700"
-            : "bg-gray-400 cursor-not-allowed"
+            ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-lg'
+            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
         }`}
       >
-        {status.allowed ? "Enter Room" : "Enter Room (Locked)"}
+        <Video className="w-4 h-4 inline mr-2" />
+        {status.allowed ? (locale === 'ru' ? 'Войти в комнату' : 'Enter Room') : (locale === 'ru' ? 'Ожидание...' : 'Waiting...')}
       </button>
-
       {!status.allowed && status.reason && (
-        <p className="text-sm text-red-500">{status.reason}</p>
+        <p className="text-xs text-red-500 mt-2 text-center">{status.reason}</p>
       )}
     </div>
   );

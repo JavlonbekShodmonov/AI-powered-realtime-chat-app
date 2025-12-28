@@ -40,7 +40,7 @@ export async function PATCH(
   return NextResponse.json({ message: "message updated" });
 }
 
-async function getMessageById(id: string, userId: string) {
+export async function getMessageById(id: string, userId: string) {
   const MongoClient = await clientPromise;
   const db = MongoClient.db();
   const messagesCollection = db.collection("messages");

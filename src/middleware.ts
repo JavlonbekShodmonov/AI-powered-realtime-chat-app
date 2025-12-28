@@ -1,7 +1,6 @@
 // middleware.ts
 import { NextResponse, NextRequest } from "next/server";
 import { getToken } from "next-auth/jwt";
-
 // ✅ FIXED: Use NextAuth JWT verification only (remove duplicate JWT logic)
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;

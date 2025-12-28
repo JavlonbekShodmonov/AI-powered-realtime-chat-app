@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     console.log(`📝 Forwarding subscription for user ${targetUserId} to socket server`);
 
     // ✅ Forward to your Socket.IO server
-    const socketServerUrl = process.env.SOCKET_SERVER_URL || "http://localhost:3001";
+    const socketServerUrl = process.env.SOCKET_SERVER_URL || "https://shadmanov.onrender.com";
     const response = await fetch(`${socketServerUrl}/api/subscribe-notifications`, {
       method: "POST",
       headers: {

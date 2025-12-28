@@ -1,20 +1,20 @@
-import  clientPromise  from "@/lib/mongodb";
+import  clientPromise  from "../lib/mongodb";
 import { ObjectId } from "mongodb";
 
 // Get users by IDs from your MongoDB "users" collection
-async function getUsersByIds(userIds) {
+async function getUsersByIds(userIds:any) {
   const client = await clientPromise;
   const db = client.db();
   const users = await db
     .collection("users")
-    .find({ _id: { $in: userIds.map((id) => new ObjectId(id)) } })
+    .find({ _id: { $in: userIds.map((id:any) => new ObjectId(id)) } })
     .project({ name: 1, email: 1, image: 1 })
     .toArray();
 
   return Object.fromEntries(users.map((u) => [u._id.toString(), u]));
 }
 
-export const getMessages = async ({ roomId, page = 1, limit = 20 }) => {
+export const getMessages = async ({ roomId, page = 1, limit = 20 }: { roomId: string; page?: number; limit?: number }) => {
   const client = await clientPromise;
   const db = client.db();
   const messagesCollection = db.collection("messages");
@@ -37,7 +37,7 @@ export const getMessages = async ({ roomId, page = 1, limit = 20 }) => {
   }));
 };
 
-export async function sendMessage({ roomId, senderId, content }) {
+export async function sendMessage({ roomId, senderId, content }: { roomId: string; senderId: string; content: string }) {
   const client = await clientPromise;
   const db = client.db();
 
@@ -50,10 +50,11 @@ export async function sendMessage({ roomId, senderId, content }) {
 
   const { insertedId } = await db.collection("messages").insertOne(newMessage);
   const insertedMessage = await db.collection("messages").findOne({ _id: insertedId });
+  if (!insertedMessage) throw new Error("Failed to retrieve inserted message");
   return { ...insertedMessage, _id: insertedMessage._id.toString() };
 }
 
-export async function updateMessage({ messageId, senderId, text }) {
+export async function updateMessage({ messageId, senderId, text }:{messageId:string, senderId:string, text:string}) {
   const client = await clientPromise;
   const db = client.db();
 
@@ -63,11 +64,11 @@ export async function updateMessage({ messageId, senderId, text }) {
     { returnDocument: "after" }
   );
 
-  if (!result.value) throw new Error("Message not found or unauthorized");
+  if (!result || !result.value) throw new Error("Message not found or unauthorized");
   return { ...result.value, _id: result.value._id.toString() };
 }
 
-export async function deleteMessage({ messageId, senderId }) {
+export async function deleteMessage({ messageId, senderId }:{messageId:string, senderId:string}) {
   const client = await clientPromise;
   const db = client.db();
 

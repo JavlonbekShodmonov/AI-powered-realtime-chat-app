@@ -13,10 +13,21 @@ export async function POST(req: Request) {
     const token = req.headers.get("authorization")?.split(" ")[1];
     if (!token) return new Response("Unauthorized", { status: 401 });
 
-    const { payload } = await jwtVerify(token, new TextEncoder().encode(process.env.JWT_SECRET));
+    const { payload } = await jwtVerify(
+      token,
+      new TextEncoder().encode(process.env.JWT_SECRET)
+    );
     const userId = payload.userId;
 
-    const newMessage = await sendMessage({ roomId, senderId: userId, content: text });
+    const newMessage = await sendMessage({
+      roomId,
+      senderId: userId,
+      content: text,
+    });
+
+    // 🔔 Notify sockets
+    global.io?.to(roomId).emit("newMessage", newMessage);
+
     return Response.json(newMessage);
   } catch (error) {
     console.error("POST /api/messages error:", error);

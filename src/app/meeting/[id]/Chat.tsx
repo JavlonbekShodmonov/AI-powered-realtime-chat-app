@@ -4,16 +4,19 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import io, { Socket } from "socket.io-client";
 import { useSession } from "next-auth/react";
-import 'next-auth';
+import "next-auth";
+import AISuggestionsPanel from "../../components/ui/AISuggestionsPanel";
+import React from "react";
+import { useLocale } from "../../components/provider/locale-provider";
 
-declare module 'next-auth' {
+declare module "next-auth" {
   interface Session {
     user: {
-      id?: string
-      name?: string | null
-      email?: string | null
-      image?: string | null
-    }
+      id?: string;
+      name?: string | null;
+      email?: string | null;
+      image?: string | null;
+    };
   }
 }
 
@@ -24,15 +27,18 @@ type ChatProps = {
 
 export default function Chat({ roomId, targetUserId }: ChatProps) {
   const { data: session, status } = useSession();
+  const { locale } = useLocale();
   const router = useRouter();
-
+  const [showAIHelper, setShowAIHelper] = useState(true);
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [summary, setSummary] = useState("");
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [roomUsers, setRoomUsers] = useState<string[]>([]);
-  const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string }[]>([]);
-
+  const [onlineUsers, setOnlineUsers] = useState<
+    { id: string; name: string }[]
+  >([]);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -42,7 +48,8 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     const container = containerRef.current;
     if (!container) return;
 
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
     if (distanceFromBottom < 100) {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
@@ -51,9 +58,21 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   // Socket setup
   useEffect(() => {
     if (status !== "authenticated" || !session?.user) return;
-    if (socketRef.current) return;
 
-    const base = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
+    // Prevent duplicate connections
+    if (socketRef.current?.connected) {
+      console.log("✅ Socket already connected, reusing");
+      socketRef.current.emit("joinRoom", {
+        roomId,
+        userId: session.user.id,
+        userName: session.user.name || "Anonymous",
+      });
+      return;
+    }
+
+    const base =
+      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
+
     const socket = io(base, {
       path: "/socket.io",
       transports: ["websocket"],
@@ -67,12 +86,9 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
     socket.on("connect", () => {
       console.log("🔌 Chat socket connected:", socket.id);
-      
-      socket.emit("identify", {
-        userId: session.user.id,
-        userName: session.user.name || "Anonymous",
-      });
-      
+      console.log("   With userId:", session.user.id);
+      console.log("   With userName:", session.user.name);
+
       socket.emit("joinRoom", {
         roomId,
         userId: session.user.id,
@@ -85,11 +101,13 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       setRoomUsers(users);
     });
 
-    socket.on("initialMessages", (grouped: Record<string, any[]>) => {
-      const flat = Object.values(grouped).flat();
-      console.log("📨 Initial messages received:", flat.length);
-      setMessages(flat);
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
+    socket.on("initialMessages", (messages: any[]) => {
+      console.log("📨 Initial messages received:", messages.length);
+      setMessages(messages);
+      setTimeout(
+        () => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }),
+        50
+      );
     });
 
     socket.on("newMessage", (message) => {
@@ -99,7 +117,9 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
         _id: message._id?.toString?.() || String(message._id),
       };
       setMessages((prev) =>
-        prev.some((m) => m._id === normalized._id) ? prev : [...prev, normalized]
+        prev.some((m) => m._id === normalized._id)
+          ? prev
+          : [...prev, normalized]
       );
     });
 
@@ -145,11 +165,14 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     });
 
     return () => {
-      console.log("🔌 Disconnecting chat socket");
-      socket.disconnect();
+      console.log("🔌 Cleaning up chat socket listeners");
+      if (socket.connected) {
+        socket.emit("leaveRoom", { roomId });
+        socket.disconnect();
+      }
       socketRef.current = null;
     };
-  }, [status, session, roomId]);
+  }, [status, session?.user?.id, session?.user?.name, roomId]);
 
   const handleExit = () => {
     if (socketRef.current) {
@@ -162,6 +185,14 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
   const handleSend = () => {
     if (!newMessage.trim() || !socketRef.current || !session?.user) return;
+
+    console.log("📤 Sending message with:", {
+      roomId,
+      senderId: session.user.id,
+      senderName: session.user.name,
+      content: newMessage.trim(),
+    });
+
     socketRef.current.emit("sendMessage", {
       roomId,
       senderId: session.user.id,
@@ -170,6 +201,12 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       createdAt: new Date(),
     });
     setNewMessage("");
+  };
+
+  const handleSelectSuggestion = (suggestion: string) => {
+    setNewMessage(suggestion);
+    // Optionally auto-focus the input
+    // inputRef.current?.focus();
   };
 
   const handleUpdate = (id: string) => {
@@ -181,7 +218,9 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       senderId: session?.user.id,
       newContent: newText,
     });
-    setMessages((prev) => prev.map((m) => (m._id === id ? { ...m, content: newText } : m)));
+    setMessages((prev) =>
+      prev.map((m) => (m._id === id ? { ...m, content: newText } : m))
+    );
   };
 
   const handleDelete = (id: string) => {
@@ -194,17 +233,64 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   };
 
   const handleSummarize = async () => {
+    if (messages.length === 0) {
+      alert(
+        locale === "ru"
+          ? "Нет сообщений для суммирования"
+          : "No messages to summarize"
+      );
+      return;
+    }
+
     setLoadingSummary(true);
+    const url = "/api/summarize";
+
+    console.log("🔍 Summarize request:", {
+      roomId,
+      selectedUserId,
+      messagesCount: messages.length,
+    });
+
     try {
-      const res = await fetch("/api/summarize", {
+      const res = await fetch(url, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: messages.map((m) => m.content).join("\n") }),
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          roomId,
+          userId: selectedUserId,
+        }),
       });
+
+      console.log("📡 Response status:", res.status);
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error("❌ Error response:", errorText);
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+
       const data = await res.json();
-      setSummary(data.summary || "No summary available.");
-    } catch {
-      setSummary("Failed to summarize chat.");
+      console.log("✅ Response data:", data);
+
+      if (data.error) {
+        setSummary(`Error: ${data.error}`);
+      } else if (selectedUserId && data.userSummary) {
+        setSummary(data.userSummary);
+      } else if (data.fullSummary) {
+        setSummary(data.fullSummary);
+      } else {
+        console.warn("⚠️ Unexpected response format:", data);
+        setSummary(JSON.stringify(data, null, 2) || "No summary available.");
+      }
+    } catch (error) {
+      console.error("❌ Summarization error:", error);
+      setSummary(
+        `Failed to summarize: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
     } finally {
       setLoadingSummary(false);
     }
@@ -225,24 +311,17 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-indigo-50 to-slate-100 flex flex-col font-sans text-gray-800">
-      {/* Mobile Header - Only visible on small screens */}
+      {/* Mobile Header */}
       <div className="lg:hidden sticky top-0 z-10 bg-white/90 backdrop-blur-md border-b-2 border-gray-200 shadow-sm px-4 py-3 flex items-center justify-between">
-        <h1 className="text-lg font-semibold text-slate-700">Chat Room</h1>
-        <div className="flex gap-2">
-          <button
-            onClick={handleSummarize}
-            disabled={loadingSummary}
-            className="px-3 py-2 text-sm border-2 border-indigo-500 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all duration-300 font-semibold"
-          >
-            {loadingSummary ? "..." : "Summarize"}
-          </button>
-          <button
-            onClick={handleExit}
-            className="px-3 py-2 text-sm border-2 border-indigo-500 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all duration-300 font-semibold"
-          >
-            Exit
-          </button>
-        </div>
+        <h1 className="text-lg font-semibold text-slate-700">
+          {locale === "ru" ? "Комната встречи" : "Meeting Room"} — {roomId}
+        </h1>
+        <button
+          onClick={handleExit}
+          className="px-3 py-2 text-sm border-2 border-indigo-500 text-indigo-600 rounded-lg hover:bg-indigo-600 hover:text-white transition-all duration-300 font-semibold"
+        >
+          {locale === "ru" ? "Выйти" : "Exit"}
+        </button>
       </div>
 
       <main className="flex flex-col lg:flex-row justify-center items-center lg:items-center gap-4 lg:gap-8 p-2 sm:p-4 lg:p-8 w-full max-w-7xl mx-auto flex-1">
@@ -252,29 +331,38 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
             onClick={handleExit}
             className="px-6 py-3 border-2 border-indigo-500 text-indigo-600 rounded-3xl hover:bg-indigo-600 hover:text-white transition-all duration-300 font-semibold shadow-sm"
           >
-            Exit
+            {locale === "ru" ? "Выйти из встречи" : "Exit Meeting"}
           </button>
         </div>
 
         {/* MIDDLE CHAT COLUMN */}
-        <div className="relative border-2 lg:border-4 border-black bg-white/90 backdrop-blur-md rounded-2xl lg:rounded-3xl shadow-2xl p-3 sm:p-4 lg:p-6 w-full max-w-3xl flex flex-col transition-all duration-300 hover:shadow-indigo-200 overflow-hidden"
-          style={{ height: 'calc(100vh - 80px)', maxHeight: 'calc(100vh - 80px)' }}
+        <div
+          className="relative border-2 lg:border-4 border-black bg-white/90 backdrop-blur-md rounded-2xl lg:rounded-3xl shadow-2xl p-3 sm:p-4 lg:p-6 w-full max-w-3xl flex flex-col transition-all duration-300 hover:shadow-indigo-200 overflow-hidden"
+          style={{
+            height: "calc(100vh - 80px)",
+            maxHeight: "calc(100vh - 80px)",
+          }}
         >
           {/* Online Users */}
           <div className="mb-3 flex-shrink-0">
             <div className="text-xs text-gray-500 mb-1">
-              Online Users ({onlineUsers.length}):
+              {locale === "ru" ? "Пользователи в сети" : "Online Users"} (
+              {onlineUsers.length}):
             </div>
             <div className="flex flex-wrap gap-1 sm:gap-2 text-xs sm:text-sm font-medium">
               {onlineUsers.length === 0 ? (
-                <span className="text-gray-400 italic">Loading online users...</span>
+                <span className="text-gray-400 italic">
+                  {locale === "ru"
+                    ? "Загрузка пользователей в сети..."
+                    : "Loading online users..."}
+                </span>
               ) : (
                 onlineUsers.map((u) => (
                   <span
                     key={u.id}
                     className="px-2 sm:px-3 py-1 rounded-full bg-green-100 text-green-700 border border-green-300 shadow-sm"
                   >
-                    {u.name || "Unknown"}
+                    {u.name || (locale === "ru" ? "Анонимный" : "Anonymous")}
                   </span>
                 ))
               )}
@@ -307,7 +395,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                         : "text-slate-700"
                     }`}
                   >
-                    {msg.sender?.name ?? "Guest"}
+                    {msg.sender?.name || (locale === "ru" ? "Гость" : "Guest")}
                   </span>
 
                   {msg.senderId === session?.user?.id && (
@@ -316,13 +404,13 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                         onClick={() => handleUpdate(String(msg._id))}
                         className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-yellow-300 to-yellow-400 hover:from-yellow-400 hover:to-yellow-500 text-slate-800 font-medium shadow-sm"
                       >
-                        Edit
+                        {locale === "ru" ? "Редактировать" : "Edit"}
                       </button>
                       <button
                         onClick={() => handleDelete(String(msg._id))}
                         className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-red-400 to-red-500 hover:from-red-500 hover:to-red-600 text-white font-medium shadow-sm"
                       >
-                        Delete
+                        {locale === "ru" ? "Удалить" : "Delete"}
                       </button>
                     </div>
                   )}
@@ -349,7 +437,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
               onClick={handleSend}
               className="px-4 sm:px-6 py-2 sm:py-3 text-sm sm:text-base rounded-lg sm:rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white hover:opacity-90 transition-all duration-200 shadow-md font-semibold"
             >
-              Send
+              {locale === "ru" ? "Отправить" : "Send"}
             </button>
           </div>
 
@@ -357,34 +445,82 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
           {summary && (
             <div className="mt-3 sm:mt-6 p-3 sm:p-4 border border-indigo-200 rounded-xl bg-indigo-50 text-left shadow-sm flex-shrink-0">
               <h3 className="font-semibold mb-2 text-indigo-700 text-sm sm:text-base">
-                Chat Summary:
+                {locale === "ru" ? "Суммаризация чата:" : "Chat Summary:"}
               </h3>
-              <p className="whitespace-pre-wrap text-slate-800 text-xs sm:text-sm">{summary}</p>
+              <p className="whitespace-pre-wrap text-slate-800 text-xs sm:text-sm">
+                {summary}
+              </p>
             </div>
           )}
         </div>
 
-        {/* RIGHT COLUMN - Hidden on mobile */}
-        <div className="hidden lg:flex flex-col items-center justify-center space-y-4 border-4 border-black rounded-3xl p-6 bg-white/80 shadow-xl backdrop-blur-sm hover:shadow-2xl transition-all duration-300">
+        {/* RIGHT COLUMN */}
+        <div className="flex flex-col items-center justify-center space-y-3 sm:space-y-4 border-2 sm:border-3 lg:border-4 border-black rounded-2xl sm:rounded-3xl p-4 sm:p-5 lg:p-6 bg-white/80 shadow-xl backdrop-blur-sm hover:shadow-2xl transition-all duration-300 w-full lg:w-auto max-w-md lg:max-w-none">
+          {/* Dropdown to select user or full chat */}
+          <div className="flex flex-col items-center space-y-2 w-full">
+            <label className="font-medium text-xs sm:text-sm text-gray-700">
+              {locale === "ru" ? "Суммировать для:" : "Summarize for:"}
+            </label>
+            <select
+              value={selectedUserId || ""}
+              onChange={(e) => setSelectedUserId(e.target.value || null)}
+              className="w-full border rounded-lg p-2 text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            >
+              <option value="">
+                {locale === "ru" ? "Весь чат" : "Full Chat"}
+              </option>
+              {onlineUsers.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name || (locale === "ru" ? "Анонимный" : "Anonymous")}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Summarize button */}
           <button
             onClick={handleSummarize}
             disabled={loadingSummary}
-            className="px-6 py-3 border-2 border-indigo-500 text-indigo-600 rounded-full uppercase text-lg font-semibold hover:bg-indigo-600 hover:text-white transition-all duration-300 shadow-sm"
+            className="px-4 sm:px-5 lg:px-6 py-2 sm:py-2.5 lg:py-3 border-2 border-indigo-500 text-indigo-600 rounded-full uppercase text-sm sm:text-base lg:text-lg font-semibold hover:bg-indigo-600 hover:text-white transition-all duration-300 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed w-full lg:w-auto"
           >
-            {loadingSummary ? "Summarizing..." : "Summarize"}
+            {loadingSummary
+              ? locale === "ru"
+                ? "Суммируется..."
+                : "Summarizing..."
+              : locale === "ru"
+              ? "Суммировать"
+              : "Summarize"}
           </button>
 
-          <div className="w-0 h-0 border-l-[10px] border-r-[10px] border-b-[10px] border-l-transparent border-r-transparent border-b-indigo-500"></div>
+          {/* Decorative arrow */}
+          <div className="w-0 h-0 border-l-[8px] sm:border-l-[10px] border-r-[8px] sm:border-r-[10px] border-b-[8px] sm:border-b-[10px] border-l-transparent border-r-transparent border-b-indigo-500"></div>
 
-          <h2 className="font-light text-lg text-slate-600 text-center">
-            Click to summarize your chat
+          {/* Info text */}
+          <h2 className="font-light text-sm sm:text-base lg:text-lg text-slate-600 text-center">
+            {locale === "ru"
+              ? "Получите краткое содержание выбранного пользователя или всего чата одним нажатием кнопки."
+              : "Get a concise summary of the selected user or the entire chat with a single click."}
           </h2>
         </div>
       </main>
 
-      {/* Footer - adjusted for mobile */}
+      {showAIHelper && session?.user && (
+        <AISuggestionsPanel
+          roomId={roomId}
+          userId={session.user.id!}
+          userName={session.user.name || "User"}
+          onSelectSuggestion={handleSelectSuggestion}
+          locale={locale}
+        />
+      )}
+
+      {/* Footer */}
       <footer className="text-center lg:text-right py-2 px-4 text-xs sm:text-sm text-gray-400">
-        <p>@ 2025 Shadmanov. All Rights Reserved.</p>
+        <p>
+          {locale === "ru"
+            ? "© 2025 СумМит. Все права защищены."
+            : "© 2025 SumMeet. All rights reserved."}
+        </p>
       </footer>
     </div>
   );

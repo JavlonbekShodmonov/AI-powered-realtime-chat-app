@@ -4,6 +4,12 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "../../lib/auth"; // we’ll create this next
 
 const meetings: any[] = []; // still temporary
+export async function GET() {
+  return NextResponse.json({ 
+    message: "Summarize API is accessible!",
+    timestamp: new Date().toISOString() 
+  });
+}
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
