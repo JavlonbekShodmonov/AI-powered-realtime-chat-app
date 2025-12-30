@@ -117,8 +117,10 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
         _id: message._id?.toString?.() || String(message._id),
       };
       setMessages((prev) =>
-        prev.some((m) => m._id === normalized._id)
-          ? prev
+        Array.isArray(prev)
+          ? prev.some((m) => m._id === normalized._id)
+            ? prev
+            : [...prev, normalized]
           : [...prev, normalized]
       );
     });
