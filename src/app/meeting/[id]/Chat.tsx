@@ -150,7 +150,9 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     socket.on("messageEdited", (updated) => {
       console.log("✏️ Message edited:", updated);
       setMessages((prev) =>
-        prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m))
+        Array.isArray(prev)
+          ? prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m))
+          : prev
       );
     });
 
@@ -219,7 +221,9 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       newContent: newText,
     });
     setMessages((prev) =>
-      prev.map((m) => (m._id === id ? { ...m, content: newText } : m))
+      Array.isArray(prev)
+        ? prev.map((m) => (m._id === id ? { ...m, content: newText } : m))
+        : prev
     );
   };
 
@@ -356,7 +360,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                     ? "Загрузка пользователей в сети..."
                     : "Loading online users..."}
                 </span>
-              ) : (
+              ) : (Array.isArray(onlineUsers) &&
                 onlineUsers.map((u) => (
                   <span
                     key={u.id}
@@ -378,7 +382,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
               minHeight: 0,
             }}
           >
-            {messages.map((msg) => (
+            {Array.isArray(messages) && messages.map((msg) => (
               <div
                 key={msg._id}
                 className={`p-2 sm:p-3 rounded-lg sm:rounded-xl shadow-sm flex flex-col justify-between transition-all duration-200 ${
@@ -469,7 +473,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
               <option value="">
                 {locale === "ru" ? "Весь чат" : "Full Chat"}
               </option>
-              {onlineUsers.map((u) => (
+              {Array.isArray(onlineUsers) && onlineUsers.map((u) => (
                 <option key={u.id} value={u.id}>
                   {u.name || (locale === "ru" ? "Анонимный" : "Anonymous")}
                 </option>
