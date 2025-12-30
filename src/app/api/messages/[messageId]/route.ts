@@ -1,7 +1,7 @@
 import { ObjectId } from "mongodb";
 import { NextRequest, NextResponse } from "next/server";
-import  clientPromise  from "@/lib/mongodb";
 import  { auth }  from "../../../../lib/auth";
+import {fetchMessage} from "../../../../lib/fetchMessage";
 
 
 export async function PATCH(
@@ -23,7 +23,7 @@ export async function PATCH(
     );
   }
 
-  const { message, messagesCollection, error, status } = await GET(
+  const { messagesCollection, error, status } = await fetchMessage(
     params.id,
     userId
   );
@@ -40,24 +40,6 @@ export async function PATCH(
   return NextResponse.json({ message: "message updated" });
 }
 
-export async function GET(id: string, userId: string) {
-  const MongoClient = await clientPromise;
-  const db = MongoClient.db();
-  const messagesCollection = db.collection("messages");
-
-  const message = await messagesCollection.findOne({ _id: new ObjectId(id) });
-
-  if (!message) {
-    return { error: "Message not found", status: 404, messagesCollection };
-  }
-
-  if (message.senderId !== userId) {
-    return { error: "Forbidden", status: 403, messagesCollection };
-  }
-
-  return { message, messagesCollection };
-}
-
 export async function DELETE(
   req: NextRequest,
   { params }: { params: { id: string } }
@@ -69,7 +51,7 @@ export async function DELETE(
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const { message, messagesCollection, error, status } = await GET(
+  const { messagesCollection, error} = await fetchMessage(
     params.id,
     userId
   );
