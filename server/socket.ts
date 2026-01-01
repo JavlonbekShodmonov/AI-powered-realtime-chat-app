@@ -239,18 +239,30 @@ app.get("/", (req, res) => {
 // ✅ Helper function to broadcast online users in a room
 function broadcastRoomUsers(roomId: string) {
   const usersInRoom = roomUsers[roomId];
-  if (!usersInRoom) return;
+  if (!usersInRoom) {
+    console.log(`   ⚠️ No users tracked for room ${roomId}`);
+    return;
+  }
 
+  console.log(`   📊 All users in room ${roomId}:`, Array.from(usersInRoom));
+  console.log(`   📊 All online users globally:`, Array.from(onlineUsers.keys()));
+
+  // ✅ CRITICAL: Only include users who are BOTH in the room AND online
   const onlineInRoom = Array.from(usersInRoom)
-    .filter((userId) => onlineUsers.has(userId))
+    .filter((userId) => {
+      const isOnline = onlineUsers.has(userId);
+      console.log(`      User ${userId}: in room=${true}, online=${isOnline}`);
+      return isOnline;
+    })
     .map((userId) => ({
       id: userId,
       name: onlineUsers.get(userId)?.name || "Anonymous",
     }));
 
+  console.log(`   ✅ Sending to room ${roomId} ONLY these users:`, onlineInRoom);
+
   // Only broadcast to users IN THIS ROOM
   io.to(roomId).emit("onlineUsersWithNames", onlineInRoom);
-  console.log(`   📤 Broadcast to room ${roomId}:`, onlineInRoom);
 }
 
 io.on("connection", (socket: Socket) => {
