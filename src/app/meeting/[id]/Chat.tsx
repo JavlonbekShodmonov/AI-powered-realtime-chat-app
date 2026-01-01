@@ -156,16 +156,20 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
     socket.on("messageEdited", (updated) => {
       console.log("✏️ Message edited:", updated);
-      setMessages((prev) =>
-        Array.isArray(prev)
-          ? prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m))
-          : prev
-      );
+      setMessages((prev) => {
+        const prevArray = Array.isArray(prev) ? prev : [];
+        return prevArray.map((m) =>
+          m._id === updated._id ? { ...m, ...updated } : m
+        );
+      });
     });
 
     socket.on("messageDeleted", (id: string) => {
       console.log("🗑️ Message deleted:", id);
-      setMessages((prev) => prev.filter((m) => m._id !== id && m.id !== id));
+      setMessages((prev) => {
+        const prevArray = Array.isArray(prev) ? prev : [];
+        return prevArray.filter((m) => m._id !== id && m.id !== id);
+      });
     });
 
     socket.on("user-left", () => {
