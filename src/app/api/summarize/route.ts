@@ -147,7 +147,7 @@ export async function POST(req: NextRequest) {
       console.log(`📝 User ${userName} messages count:`, userMessages.length);
       console.log(`📝 User text length:`, userText?.length || 0);
     }
-
+ 
     try {
       console.log("🤖 Starting AI summarization...");
       
