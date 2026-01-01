@@ -22,13 +22,13 @@ export default function Home() {
           {!session ? (
             <>
               <button
-                onClick={() => signIn("google")}
+                onClick={() => signIn("google", {callbackUrl: "/schedule"})}
                 className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 w-full sm:w-auto text-center"
               >
                 {locale === 'ru' ? 'Войти с помощью Google' : 'Login with Google'}
               </button>
               <button
-                onClick={() => signIn("github")}
+                onClick={() => signIn("github",{callbackUrl: "/schedule"})}
                 className="px-8 py-3 bg-gray-800 hover:bg-gray-900 text-white font-semibold rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105 w-full sm:w-auto text-center"
               >
                 {locale === 'ru' ? 'Войти с помощью GitHub' : 'Login with GitHub'}

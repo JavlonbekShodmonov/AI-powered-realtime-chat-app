@@ -26,7 +26,7 @@ export const authOptions: NextAuthOptions = {
   },
 
   pages: {
-    signIn: "/auth/signin",
+    signIn: "/",  // ✅ Changed to match your actual sign-in page
   },
 
   callbacks: {
@@ -37,6 +37,18 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (token) session.user.id = token.id as string;
       return session;
+    },
+    // ✅ Add this callback to redirect after sign-in
+    async redirect({ url, baseUrl }) {
+      // If signing in, redirect to schedule
+      if (url === baseUrl || url === `${baseUrl}/`) {
+        return `${baseUrl}/schedule`;
+      }
+      // Allow relative callback URLs
+      if (url.startsWith("/")) return `${baseUrl}${url}`;
+      // Allow callback URLs on the same origin
+      if (new URL(url).origin === baseUrl) return url;
+      return baseUrl;
     },
   },
 
