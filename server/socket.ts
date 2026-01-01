@@ -279,8 +279,8 @@ io.on("connection", (socket: Socket) => {
     console.log(`✅ User ${userName || userId} is now ONLINE`);
     console.log(`   Total online users: ${onlineUsers.size}`);
 
-    // Emit global presence updates
-    io.emit("user:online", { id: userId, name: userName || "Anonymous" });
+    // ✅ DON'T broadcast globally - let rooms handle it
+    // When user joins a room, that room will get updated
   } else {
     console.warn("⚠️ Socket connected without userId in auth!");
   }
@@ -388,15 +388,13 @@ io.on("connection", (socket: Socket) => {
 
       console.log(`   User ${userId} is now OFFLINE`);
       
-      // Remove from all rooms and broadcast updates
+      // Remove from all rooms and broadcast updates to THOSE ROOMS ONLY
       Object.keys(roomUsers).forEach((roomId) => {
         if (roomUsers[roomId].has(userId)) {
           roomUsers[roomId].delete(userId);
           broadcastRoomUsers(roomId);
         }
       });
-
-      io.emit("user:offline", userId);
     } else {
       userSocketMap.set(userId, updatedSockets);
       console.log(`   User ${userId} still has ${updatedSockets.length} connection(s)`);

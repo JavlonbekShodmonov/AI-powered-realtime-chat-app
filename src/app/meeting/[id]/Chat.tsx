@@ -135,25 +135,6 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       setOnlineUsers(list);
     });
 
-    socket.on("getOnlineUsers", (list) => {
-      console.log("✅ Online users received (getOnlineUsers):", list);
-      setOnlineUsers(list);
-    });
-
-    socket.on("user:online", (user) => {
-      console.log("👤 User came online:", user);
-      setOnlineUsers((prev) => {
-        const exists = prev.some((u) => u.id === user.id);
-        if (exists) return prev;
-        return [...prev, user];
-      });
-    });
-
-    socket.on("user:offline", (userId) => {
-      console.log("👤 User went offline:", userId);
-      setOnlineUsers((prev) => prev.filter((u) => u.id !== userId));
-    });
-
     socket.on("messageEdited", (updated) => {
       console.log("✏️ Message edited:", updated);
       setMessages((prev) => {
