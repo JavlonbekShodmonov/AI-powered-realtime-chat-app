@@ -19,7 +19,8 @@ export async function getMessagesForRoom(
   limit: number = 20
 ): Promise<Message[]> {
   const client = await clientPromise;
-  const db = client.db();
+  const dbName = process.env.MONGODB_DB;
+  const db = client.db(dbName);
 
   const query: any = { roomId };
 
