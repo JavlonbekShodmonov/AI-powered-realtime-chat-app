@@ -44,6 +44,11 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  console.log("RENDER TYPES", {
+  messages: Array.isArray(messages),
+  onlineUsers: Array.isArray(onlineUsers),
+});
+
   // Auto-scroll when messages update
   useEffect(() => {
     const container = containerRef.current;
@@ -128,13 +133,17 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     });
 
     // ✅ Set up room-specific listeners
-    const handleInitialMessages = (msgs: any[]) => {
-      console.log("📨 Initial messages:", msgs.length);
+    const handleInitialMessages = (msgs: any) => {
+      if (!Array.isArray(msgs)) {
+        console.error("❌ initialMessages is not an array:", msgs);
+        setMessages([]);
+        return;
+      }
+
       setMessages(msgs);
-      setTimeout(
-        () => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }),
-        50
-      );
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+      }, 50);
     };
 
     const handleNewMessage = (message: any) => {
@@ -163,10 +172,11 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     };
 
     const handleMessageEdited = (updated: any) => {
+      if (!updated || typeof updated !== "object") return;
       console.log("✏️ Message edited:", updated);
       setMessages((prev) => {
-        const prevArray = Array.isArray(prev) ? prev : [];
-        return prevArray.map((m) =>
+        if (!Array.isArray(prev)) return [];
+        return prev.map((m) =>
           m._id === updated._id ? { ...m, ...updated } : m
         );
       });
@@ -391,49 +401,51 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
             className="flex-1 space-y-3 sm:space-y-4 overflow-y-auto mb-3 sm:mb-4 border border-gray-300 rounded-xl lg:rounded-2xl p-3 sm:p-4 bg-gradient-to-b from-white to-slate-100 shadow-inner scroll-smooth"
             style={{ wordBreak: "break-word", minHeight: 0 }}
           >
-            {messages.map((msg) => (
-              <div
-                key={msg._id}
-                className={`p-2 sm:p-3 rounded-lg sm:rounded-xl shadow-sm flex flex-col justify-between transition-all duration-200 ${
-                  msg.senderId === session?.user?.id
-                    ? "bg-gradient-to-r from-blue-100 to-blue-50 border border-blue-300"
-                    : "bg-white border border-gray-300 hover:border-blue-200"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span
-                    className={`font-semibold text-sm sm:text-base ${
-                      msg.senderId === session?.user?.id
-                        ? "text-blue-600"
-                        : "text-slate-700"
-                    }`}
-                  >
-                    {msg.sender?.name || (locale === "ru" ? "Гость" : "Guest")}
+            {Array.isArray(messages) &&
+              messages.map((msg) => (
+                <div
+                  key={msg._id}
+                  className={`p-2 sm:p-3 rounded-lg sm:rounded-xl shadow-sm flex flex-col justify-between transition-all duration-200 ${
+                    msg.senderId === session?.user?.id
+                      ? "bg-gradient-to-r from-blue-100 to-blue-50 border border-blue-300"
+                      : "bg-white border border-gray-300 hover:border-blue-200"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`font-semibold text-sm sm:text-base ${
+                        msg.senderId === session?.user?.id
+                          ? "text-blue-600"
+                          : "text-slate-700"
+                      }`}
+                    >
+                      {msg.sender?.name ||
+                        (locale === "ru" ? "Гость" : "Guest")}
+                    </span>
+
+                    {msg.senderId === session?.user?.id && (
+                      <div className="space-x-1 sm:space-x-2 flex items-center flex-shrink-0">
+                        <button
+                          onClick={() => handleUpdate(String(msg._id))}
+                          className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-yellow-300 to-yellow-400 hover:from-yellow-400 hover:to-yellow-500 text-slate-800 font-medium shadow-sm"
+                        >
+                          {locale === "ru" ? "Редактировать" : "Edit"}
+                        </button>
+                        <button
+                          onClick={() => handleDelete(String(msg._id))}
+                          className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-red-400 to-red-500 hover:from-red-500 hover:to-red-600 text-white font-medium shadow-sm"
+                        >
+                          {locale === "ru" ? "Удалить" : "Delete"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <span className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-800 text-sm sm:text-base">
+                    {msg.content}
                   </span>
-
-                  {msg.senderId === session?.user?.id && (
-                    <div className="space-x-1 sm:space-x-2 flex items-center flex-shrink-0">
-                      <button
-                        onClick={() => handleUpdate(String(msg._id))}
-                        className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-yellow-300 to-yellow-400 hover:from-yellow-400 hover:to-yellow-500 text-slate-800 font-medium shadow-sm"
-                      >
-                        {locale === "ru" ? "Редактировать" : "Edit"}
-                      </button>
-                      <button
-                        onClick={() => handleDelete(String(msg._id))}
-                        className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-red-400 to-red-500 hover:from-red-500 hover:to-red-600 text-white font-medium shadow-sm"
-                      >
-                        {locale === "ru" ? "Удалить" : "Delete"}
-                      </button>
-                    </div>
-                  )}
                 </div>
-
-                <span className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-800 text-sm sm:text-base">
-                  {msg.content}
-                </span>
-              </div>
-            ))}
+              ))}
             <div ref={messagesEndRef} />
           </div>
 
