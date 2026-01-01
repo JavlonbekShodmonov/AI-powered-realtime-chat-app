@@ -35,7 +35,9 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   const [summary, setSummary] = useState("");
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [roomUsers, setRoomUsers] = useState<string[]>([]);
-  const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string }[]>([]);
+  const [onlineUsers, setOnlineUsers] = useState<
+    { id: string; name: string }[]
+  >([]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const currentRoomRef = useRef<string | null>(null);
@@ -64,7 +66,8 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       return;
     }
 
-    const base = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
+    const base =
+      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
 
     const socket = io(base, {
       path: "/socket.io",
@@ -108,7 +111,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
         roomId: currentRoomRef.current,
         userId: session.user.id,
       });
-      
+
       // ✅ Clear state when switching rooms
       setMessages([]);
       setOnlineUsers([]);
@@ -128,7 +131,10 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     const handleInitialMessages = (msgs: any[]) => {
       console.log("📨 Initial messages:", msgs.length);
       setMessages(msgs);
-      setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }), 50);
+      setTimeout(
+        () => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }),
+        50
+      );
     };
 
     const handleNewMessage = (message: any) => {
@@ -146,8 +152,13 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       });
     };
 
-    const handleOnlineUsers = (list: { id: string; name: string }[]) => {
-      console.log("✅ Online users in THIS room:", list);
+    const handleOnlineUsers = (list: any) => {
+      if (!Array.isArray(list)) {
+        console.error("❌ onlineUsersWithNames is not an array:", list);
+        setOnlineUsers([]);
+        return;
+      }
+      console.log("👥 Online users updated:", list);
       setOnlineUsers(list);
     };
 
@@ -203,9 +214,9 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
   const handleExit = () => {
     if (socketRef.current && currentRoomRef.current) {
-      socketRef.current.emit("leaveRoom", { 
+      socketRef.current.emit("leaveRoom", {
         roomId: currentRoomRef.current,
-        userId: session?.user?.id 
+        userId: session?.user?.id,
       });
       currentRoomRef.current = null;
     }
