@@ -243,35 +243,23 @@ app.get("/", (req, res) => {
 // ✅ Helper function to broadcast online users in a room
 function broadcastRoomUsers(roomId: string) {
   const usersInRoom = chatRoomUsers[roomId];
-  if (!usersInRoom) {
-    console.log(`   ⚠️ No users tracked for room ${roomId}`);
+  if (!usersInRoom || usersInRoom.size === 0) {
+    console.log(`   ⚠️ No users in room ${roomId}`);
+    io.to(roomId).emit("onlineUsersWithNames", []);
     return;
   }
 
-  console.log(`   📊 All users in room ${roomId}:`, Array.from(usersInRoom));
-  console.log(
-    `   📊 All online users globally:`,
-    Array.from(onlineUsers.keys())
-  );
-
-  // ✅ CRITICAL: Only include users who are BOTH in the room AND online
+  // Only include users who are BOTH in the room AND online
   const onlineInRoom = Array.from(usersInRoom)
-    .filter((userId) => {
-      const isOnline = onlineUsers.has(userId);
-      console.log(`      User ${userId}: in room=${true}, online=${isOnline}`);
-      return isOnline;
-    })
+    .filter((userId) => onlineUsers.has(userId))
     .map((userId) => ({
       id: userId,
       name: onlineUsers.get(userId)?.name || "Anonymous",
     }));
 
   console.log(
-    `   ✅ Sending to room ${roomId} ONLY these users:`,
-    onlineInRoom
+    `   ✅ Broadcasting ${onlineInRoom.length} online users to room ${roomId}`
   );
-
-  // Only broadcast to users IN THIS ROOM
   io.to(roomId).emit("onlineUsersWithNames", onlineInRoom);
 }
 
@@ -325,16 +313,16 @@ io.on("connection", (socket: Socket) => {
     chatRoomUsers[roomId].add(userId);
 
     console.log(`🏠 User ${userId} joined room ${roomId}`);
-    console.log(`   Users in room:`, Array.from(chatRoomUsers[roomId]));
 
     const messages = await getMessagesForRoom(roomId, cursor, limit);
     socket.emit("initialMessages", messages);
 
-    await broadcastRoomUsers(roomId);
+    // Broadcast immediately (no await needed now)
+    broadcastRoomUsers(roomId);
   });
 
   // ✅ Leave Room
-  socket.on("leaveRoom", async ({ roomId }) => {
+  socket.on("leaveRoom", ({ roomId }) => {
     if (!userId) return;
 
     socket.leave(roomId);
@@ -345,14 +333,13 @@ io.on("connection", (socket: Socket) => {
     room.delete(userId);
 
     console.log(`🚪 User ${userId} left room ${roomId}`);
-    console.log(`   Remaining users:`, Array.from(room));
 
     if (room.size === 0) {
       delete chatRoomUsers[roomId];
       return;
     }
 
-    await broadcastRoomUsers(roomId);
+    broadcastRoomUsers(roomId);
   });
 
   // Send Message
@@ -408,7 +395,7 @@ io.on("connection", (socket: Socket) => {
     }
   });
 
-  // ✅ Disconnect
+  // ✅ Enhanced disconnect handler
   socket.on("disconnect", () => {
     if (!userId) return;
 
@@ -416,10 +403,30 @@ io.on("connection", (socket: Socket) => {
     const remaining = sockets.filter((id) => id !== socket.id);
 
     if (remaining.length === 0) {
+      // User is fully offline
       userSocketMap.delete(userId);
       onlineUsers.delete(userId);
 
       console.log(`🔴 User ${userId} is now OFFLINE`);
+
+      // ✅ CRITICAL: Remove from all chat rooms and broadcast updates
+      for (const [roomId, usersSet] of Object.entries(chatRoomUsers)) {
+        if (usersSet.has(userId)) {
+          usersSet.delete(userId);
+          console.log(`   🚪 Removing ${userId} from room ${roomId}`);
+
+          // Broadcast updated user list to the room
+          broadcastRoomUsers(roomId);
+        }
+      }
+
+      // ✅ Also clean up meeting rooms
+      for (const [meetingId, usersSet] of Object.entries(meetingRoomUsers)) {
+        if (usersSet.has(userId)) {
+          usersSet.delete(userId);
+          io.to(meetingId).emit("user-left", { userId });
+        }
+      }
     } else {
       userSocketMap.set(userId, remaining);
       console.log(
