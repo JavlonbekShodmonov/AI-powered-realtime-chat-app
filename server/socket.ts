@@ -283,65 +283,76 @@ io.on("connection", (socket: Socket) => {
   console.log("   Auth data:", { userId, userName });
 
   if (userId) {
-    // Track online users
+    // Track sockets
     if (!userSocketMap.has(userId)) {
       userSocketMap.set(userId, []);
     }
     userSocketMap.get(userId)!.push(socket.id);
 
-    // Get existing subscription if available
-    const subscription = userSubscriptions.get(userId);
+    const existing = onlineUsers.get(userId);
+    const subscription = userSubscriptions.get(userId) || null;
 
-    onlineUsers.set(userId, {
-      socketId: socket.id,
-      name: userName || "Anonymous",
-      subscription: subscription || null,
-    });
+    if (!existing) {
+      // First time online
+      onlineUsers.set(userId, {
+        socketId: socket.id,
+        name: userName || "Anonymous",
+        subscription,
+      });
+    } else {
+      // 🔥 IMPORTANT: update name if we get a better one
+      if (userName && existing.name === "Anonymous") {
+        existing.name = userName;
+        onlineUsers.set(userId, existing);
+      }
+    }
 
-    console.log(`✅ User ${userName || userId} is now ONLINE`);
-    console.log(`   Total online users: ${onlineUsers.size}`);
-
-    // ✅ DON'T broadcast globally - let rooms handle it
-    // When user joins a room, that room will get updated
-  } else {
-    console.warn("⚠️ Socket connected without userId in auth!");
+    console.log(
+      `✅ User ${userId} connected as ${onlineUsers.get(userId)?.name}`
+    );
   }
 
   // ✅ SINGLE JOIN ROOM HANDLER - Room-specific online users
-  socket.on(
-    "joinRoom",
-    async ({ roomId, userId, userName, cursor, limit = 20 }) => {
-      socket.join(roomId);
+  socket.on("joinRoom", async ({ roomId, cursor, limit = 20 }) => {
+    if (!userId) return;
 
-      if (!chatRoomUsers[roomId]) {
-        chatRoomUsers[roomId] = new Set();
-      }
-      chatRoomUsers[roomId].add(userId);
+    socket.join(roomId);
 
-      console.log(`🏠 ${userName} joined room ${roomId}`);
-      console.log(`   Users in room ${roomId}:`, Array.from(chatRoomUsers[roomId]));
-
-      // Fetch messages from MongoDB with cursor pagination
-      const messages = await getMessagesForRoom(roomId, cursor, limit);
-      socket.emit("initialMessages", messages);
-
-      // ✅ Broadcast online users IN THIS ROOM ONLY
-      broadcastRoomUsers(roomId);
+    if (!chatRoomUsers[roomId]) {
+      chatRoomUsers[roomId] = new Set();
     }
-  );
+
+    chatRoomUsers[roomId].add(userId);
+
+    console.log(`🏠 User ${userId} joined room ${roomId}`);
+    console.log(`   Users in room:`, Array.from(chatRoomUsers[roomId]));
+
+    const messages = await getMessagesForRoom(roomId, cursor, limit);
+    socket.emit("initialMessages", messages);
+
+    await broadcastRoomUsers(roomId);
+  });
 
   // ✅ Leave Room
-  socket.on("leaveRoom", ({ roomId, userId }) => {
+  socket.on("leaveRoom", async ({ roomId }) => {
+    if (!userId) return;
+
     socket.leave(roomId);
 
-    if (chatRoomUsers[roomId]) {
-      chatRoomUsers[roomId].delete(userId);
-      broadcastRoomUsers(roomId);
-      console.log(`🏠 User ${userId} left room ${roomId}`);
-      if (chatRoomUsers[roomId].size === 0) {
-        delete chatRoomUsers[roomId];
-      }
+    const room = chatRoomUsers[roomId];
+    if (!room) return;
+
+    room.delete(userId);
+
+    console.log(`🚪 User ${userId} left room ${roomId}`);
+    console.log(`   Remaining users:`, Array.from(room));
+
+    if (room.size === 0) {
+      delete chatRoomUsers[roomId];
+      return;
     }
+
+    await broadcastRoomUsers(roomId);
   });
 
   // Send Message
@@ -401,32 +412,18 @@ io.on("connection", (socket: Socket) => {
   socket.on("disconnect", () => {
     if (!userId) return;
 
-    console.log(`❌ ${userName || userId} disconnecting...`);
+    const sockets = userSocketMap.get(userId) || [];
+    const remaining = sockets.filter((id) => id !== socket.id);
 
-    const currentSockets = userSocketMap.get(userId) || [];
-    const updatedSockets = currentSockets.filter((id) => id !== socket.id);
-
-    if (updatedSockets.length === 0) {
+    if (remaining.length === 0) {
       userSocketMap.delete(userId);
       onlineUsers.delete(userId);
 
-      console.log(`   User ${userId} is now OFFLINE`);
-
-      // Remove from all rooms and broadcast updates to THOSE ROOMS ONLY
-      Object.keys(chatRoomUsers).forEach((roomId) => {
-        if (chatRoomUsers[roomId].has(userId)) {
-          chatRoomUsers[roomId].delete(userId);
-          broadcastRoomUsers(roomId);
-
-          if (chatRoomUsers[roomId].size === 0) {
-            delete chatRoomUsers[roomId];
-          }
-        }
-      });
+      console.log(`🔴 User ${userId} is now OFFLINE`);
     } else {
-      userSocketMap.set(userId, updatedSockets);
+      userSocketMap.set(userId, remaining);
       console.log(
-        `   User ${userId} still has ${updatedSockets.length} connection(s)`
+        `🟡 User ${userId} still online (${remaining.length} sockets)`
       );
     }
   });
