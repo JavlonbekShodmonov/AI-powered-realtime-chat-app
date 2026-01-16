@@ -8,6 +8,7 @@ import "next-auth";
 import AISuggestionsPanel from "../../components/ui/AISuggestionsPanel";
 import React from "react";
 import { useLocale } from "../../components/provider/locale-provider";
+import VideoChatButton from '../../components/VideoChatButton';
 
 declare module "next-auth" {
   interface Session {
@@ -524,16 +525,22 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
           </h2>
         </div>
       </main>
-
-      {showAIHelper && session?.user && (
-        <AISuggestionsPanel
-          roomId={roomId}
-          userId={session.user.id!}
-          userName={session.user.name || "User"}
-          onSelectSuggestion={handleSelectSuggestion}
-          locale={locale}
+      <div className="flex flex-row gap-5 justify-center items-center">
+        {showAIHelper && session?.user && (
+          <AISuggestionsPanel
+            roomId={roomId}
+            userId={session.user.id!}
+            userName={session.user.name || "User"}
+            onSelectSuggestion={handleSelectSuggestion}
+            locale={locale}
+          />
+        )}
+        <VideoChatButton
+          meetingId={roomId}
+          userName={session?.user?.name || "Guest"}
+          variant="icon"
         />
-      )}
+      </div>
 
       <footer className="text-center lg:text-right py-2 px-4 text-xs sm:text-sm text-gray-400">
         <p>
