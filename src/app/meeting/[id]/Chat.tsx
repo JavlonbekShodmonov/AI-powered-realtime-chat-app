@@ -79,7 +79,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       path: "/socket.io",
       transports: ["websocket"],
       auth: {
-        userId: session.user.id,
+        userId: session.user.id.toString(),
         userName: session.user.name || "Anonymous",
       },
     });

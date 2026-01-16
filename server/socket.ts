@@ -42,6 +42,17 @@ interface UserInfo {
   subscription: any | null;
 }
 
+// ✅ CRITICAL: Helper to normalize userId (handles ObjectId, string, etc.)
+function normalizeUserId(userId: any): string {
+  if (!userId) return "";
+  
+  // Handle MongoDB ObjectId
+  if (userId._id) return String(userId._id);
+  if (userId.toString) return userId.toString();
+  
+  return String(userId);
+}
+
 const userSocketMap = new Map<string, string[]>(); // userId -> [socketIds]
 const onlineUsers = new Map<string, UserInfo>(); // userId -> UserInfo
 const chatRoomUsers: Record<string, Set<string>> = {};
@@ -66,7 +77,8 @@ const io = new Server(server, {
 
 // ✅ Endpoint to save push notification subscriptions
 app.post("/api/subscribe-notifications", (req, res) => {
-  const { subscription, userId } = req.body;
+  const { subscription, userId: rawUserId } = req.body;
+  const userId = normalizeUserId(rawUserId);
 
   console.log("📥 Received subscription request:", {
     userId,
@@ -92,14 +104,15 @@ app.post("/api/subscribe-notifications", (req, res) => {
   res.json({ success: true, message: "Subscription saved" });
 });
 
-// ✅ REST endpoints for presence
+// ✅ REST endpoints for presence - FIXED
 app.get("/api/presence/:userId", (req, res) => {
-  const { userId } = req.params;
+  const userId = normalizeUserId(req.params.userId);
   const isOnline = onlineUsers.has(userId);
 
   console.log(
     `🔍 Presence check for ${userId}: ${isOnline ? "✅ ONLINE" : "❌ OFFLINE"}`
   );
+  console.log(`   📊 All online users:`, Array.from(onlineUsers.keys()));
 
   if (isOnline) {
     const userInfo = onlineUsers.get(userId);
@@ -117,8 +130,8 @@ app.post("/api/emit-appointment", async (req, res) => {
   io.emit("newAppointment", appointment);
 
   const usersToNotify = new Set([
-    appointment.createdBy,
-    ...(appointment.withUserId || []),
+    normalizeUserId(appointment.createdBy),
+    ...(appointment.withUserId || []).map(normalizeUserId),
   ]);
 
   console.log(`   🔔 Users to notify:`, Array.from(usersToNotify));
@@ -183,8 +196,8 @@ app.post("/api/emit-appointment-update", async (req, res) => {
   io.emit("appointment:updated", appointment);
 
   const usersToNotify = new Set([
-    appointment.createdBy,
-    ...(appointment.withUserId || []),
+    normalizeUserId(appointment.createdBy),
+    ...(appointment.withUserId || []).map(normalizeUserId),
   ]);
 
   const results = [];
@@ -249,61 +262,78 @@ function broadcastRoomUsers(roomId: string) {
     return;
   }
 
-  // Only include users who are BOTH in the room AND online
+  console.log(`   📊 All users in room ${roomId}:`, Array.from(usersInRoom));
+  console.log(
+    `   📊 All online users globally:`,
+    Array.from(onlineUsers.keys())
+  );
+
+  // ✅ CRITICAL: Only include users who are BOTH in the room AND online
   const onlineInRoom = Array.from(usersInRoom)
-    .filter((userId) => onlineUsers.has(userId))
+    .filter((userId) => {
+      const isOnline = onlineUsers.has(userId);
+      console.log(`      User ${userId}: in room=${true}, online=${isOnline}`);
+      return isOnline;
+    })
     .map((userId) => ({
       id: userId,
       name: onlineUsers.get(userId)?.name || "Anonymous",
     }));
 
   console.log(
-    `   ✅ Broadcasting ${onlineInRoom.length} online users to room ${roomId}`
+    `   ✅ Sending to room ${roomId} ONLY these users:`,
+    onlineInRoom
   );
+
+  // Only broadcast to users IN THIS ROOM
   io.to(roomId).emit("onlineUsersWithNames", onlineInRoom);
 }
 
 io.on("connection", (socket: Socket) => {
   console.log("🔌 New socket connected:", socket.id);
 
-  const { userId, userName } = socket.handshake.auth || {};
+  const { userId: rawUserId, userName } = socket.handshake.auth || {};
+  
+  // ✅ CRITICAL: Normalize userId immediately
+  const userId = normalizeUserId(rawUserId);
 
-  console.log("   Auth data:", { userId, userName });
+  console.log("   Auth data:", { rawUserId, userId, userName });
 
-  if (userId) {
-    // Track sockets
-    if (!userSocketMap.has(userId)) {
-      userSocketMap.set(userId, []);
-    }
-    userSocketMap.get(userId)!.push(socket.id);
-
-    const existing = onlineUsers.get(userId);
-    const subscription = userSubscriptions.get(userId) || null;
-
-    if (!existing) {
-      // First time online
-      onlineUsers.set(userId, {
-        socketId: socket.id,
-        name: userName || "Anonymous",
-        subscription,
-      });
-    } else {
-      // 🔥 IMPORTANT: update name if we get a better one
-      if (userName && existing.name === "Anonymous") {
-        existing.name = userName;
-        onlineUsers.set(userId, existing);
-      }
-    }
-
-    console.log(
-      `✅ User ${userId} connected as ${onlineUsers.get(userId)?.name}`
-    );
+  if (!userId) {
+    console.error("❌ No valid userId provided in auth");
+    return;
   }
 
-  // ✅ SINGLE JOIN ROOM HANDLER - Room-specific online users
-  socket.on("joinRoom", async ({ roomId, cursor, limit = 20 }) => {
-    if (!userId) return;
+  // Track sockets
+  if (!userSocketMap.has(userId)) {
+    userSocketMap.set(userId, []);
+  }
+  userSocketMap.get(userId)!.push(socket.id);
 
+  const existing = onlineUsers.get(userId);
+  const subscription = userSubscriptions.get(userId) || null;
+
+  if (!existing) {
+    // First time online
+    onlineUsers.set(userId, {
+      socketId: socket.id,
+      name: userName || "Anonymous",
+      subscription,
+    });
+    console.log(`✅ User ${userId} connected as ${userName || "Anonymous"} (NEW)`);
+  } else {
+    // Update name if we get a better one
+    if (userName && existing.name === "Anonymous") {
+      existing.name = userName;
+      onlineUsers.set(userId, existing);
+    }
+    console.log(`✅ User ${userId} reconnected (EXISTING)`);
+  }
+
+  console.log(`   📊 Total online users: ${onlineUsers.size}`);
+
+  // ✅ Join Room
+  socket.on("joinRoom", async ({ roomId, cursor, limit = 20 }) => {
     socket.join(roomId);
 
     if (!chatRoomUsers[roomId]) {
@@ -313,18 +343,16 @@ io.on("connection", (socket: Socket) => {
     chatRoomUsers[roomId].add(userId);
 
     console.log(`🏠 User ${userId} joined room ${roomId}`);
+    console.log(`   Users in room:`, Array.from(chatRoomUsers[roomId]));
 
     const messages = await getMessagesForRoom(roomId, cursor, limit);
     socket.emit("initialMessages", messages);
 
-    // Broadcast immediately (no await needed now)
     broadcastRoomUsers(roomId);
   });
 
   // ✅ Leave Room
   socket.on("leaveRoom", ({ roomId }) => {
-    if (!userId) return;
-
     socket.leave(roomId);
 
     const room = chatRoomUsers[roomId];
@@ -333,6 +361,7 @@ io.on("connection", (socket: Socket) => {
     room.delete(userId);
 
     console.log(`🚪 User ${userId} left room ${roomId}`);
+    console.log(`   Remaining users:`, Array.from(room));
 
     if (room.size === 0) {
       delete chatRoomUsers[roomId];
@@ -350,13 +379,12 @@ io.on("connection", (socket: Socket) => {
       content: data.content,
     });
 
-    const senderInfo = onlineUsers.get(data.senderId);
+    const senderInfo = onlineUsers.get(userId);
     const newMessageWithSenderId = {
       ...newMessage,
-      sender: senderInfo ? { id: data.senderId, name: senderInfo.name } : null,
+      sender: senderInfo ? { id: userId, name: senderInfo.name } : null,
     };
 
-    // ✅ Only send to users IN THIS ROOM
     io.to(data.roomId).emit("newMessage", newMessageWithSenderId);
   });
 
@@ -381,24 +409,18 @@ io.on("connection", (socket: Socket) => {
 
   // ✅ Leave Meeting
   socket.on("leaveMeeting", ({ meetingId }) => {
-    if (userId) {
-      socket.leave(meetingId);
-      io.to(meetingId).emit("user-left", { userId });
+    socket.leave(meetingId);
+    io.to(meetingId).emit("user-left", { userId });
 
-      if (!meetingRoomUsers[meetingId]) {
-        meetingRoomUsers[meetingId] = new Set();
-      }
-
-      meetingRoomUsers[meetingId].delete(userId);
-
-      // ❌ DO NOT call broadcastRoomUsers here
+    if (!meetingRoomUsers[meetingId]) {
+      meetingRoomUsers[meetingId] = new Set();
     }
+
+    meetingRoomUsers[meetingId].delete(userId);
   });
 
-  // ✅ Enhanced disconnect handler
+  // ✅ Disconnect - FIXED
   socket.on("disconnect", () => {
-    if (!userId) return;
-
     const sockets = userSocketMap.get(userId) || [];
     const remaining = sockets.filter((id) => id !== socket.id);
 
@@ -409,18 +431,16 @@ io.on("connection", (socket: Socket) => {
 
       console.log(`🔴 User ${userId} is now OFFLINE`);
 
-      // ✅ CRITICAL: Remove from all chat rooms and broadcast updates
+      // Remove from all chat rooms and broadcast updates
       for (const [roomId, usersSet] of Object.entries(chatRoomUsers)) {
         if (usersSet.has(userId)) {
           usersSet.delete(userId);
           console.log(`   🚪 Removing ${userId} from room ${roomId}`);
-
-          // Broadcast updated user list to the room
           broadcastRoomUsers(roomId);
         }
       }
 
-      // ✅ Also clean up meeting rooms
+      // Clean up meeting rooms
       for (const [meetingId, usersSet] of Object.entries(meetingRoomUsers)) {
         if (usersSet.has(userId)) {
           usersSet.delete(userId);
