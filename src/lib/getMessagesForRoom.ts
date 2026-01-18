@@ -39,9 +39,12 @@ export async function getMessagesForRoom(
   const senderIds = [...new Set(messages.map((m: any) => m.senderId))];
 
   // ✅ Fetch user names for all senders
+  // Keep only valid ObjectIds
+  const validSenderIds = senderIds.filter((id) => ObjectId.isValid(id));
+
   const users = await db
     .collection("users")
-    .find({ _id: { $in: senderIds.map((id: any) => new ObjectId(id)) } })
+    .find({ _id: { $in: validSenderIds.map((id) => new ObjectId(id)) } })
     .project({ _id: 1, name: 1 })
     .toArray();
 
