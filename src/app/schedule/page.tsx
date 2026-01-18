@@ -8,7 +8,7 @@ import { canEnterRoom } from "../utils/roomApi";
 import { useSession } from "next-auth/react";
 import { socketManager } from "../utils/socketClient";
 import { useLocale } from "../components/provider/locale-provider";
-import { Calendar, Clock, Users, Bell, Search, Plus, Check, X, ChevronDown, ChevronUp, Video } from "lucide-react";
+import { Calendar, Clock, Users, Bell, Search, Plus, Check, X, ChevronDown, ChevronUp, Video, AlertCircle } from "lucide-react";
 
 type UserType = {
   id: string;
@@ -21,6 +21,7 @@ export default function FirstPage() {
   const [showUsers, setShowUsers] = useState(false);
   const [startDate, setStartDate] = useState<Date | null>(null);
   const [showCalendar, setShowCalendar] = useState(false);
+  const [timeError, setTimeError] = useState<string>("");
   const { data: session } = useSession();
   const user = session?.user as UserType | undefined;
   const isSignedIn = !!session?.user;
@@ -28,7 +29,7 @@ export default function FirstPage() {
   const [users, setUsers] = useState<UserType[]>([]);
   const [error, setError] = useState("");
   const [selectedUsers, setSelectedUsers] = useState<UserType[]>([]);
-  const isReady = selectedUsers.length > 0 && startDate;
+  const isReady = selectedUsers.length > 0 && startDate && !timeError;
   const router = useRouter();
   const [appointments, setAppointments] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -40,6 +41,32 @@ export default function FirstPage() {
   const publicKey = process.env.NEXT_PUBLIC_PUBLIC_KEY;
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const { locale } = useLocale();
+
+  // Validate selected time
+  const validateTime = (date: Date | null) => {
+    if (!date) {
+      setTimeError("");
+      return;
+    }
+
+    const now = new Date();
+    const selectedTime = new Date(date);
+
+    if (selectedTime <= now) {
+      setTimeError(
+        locale === "ru"
+          ? "⚠️ Нельзя выбрать прошедшее время. Пожалуйста, выберите время в будущем."
+          : "⚠️ Cannot select past time. Please choose a future time."
+      );
+    } else {
+      setTimeError("");
+    }
+  };
+
+  const handleDateChange = (date: Date | null) => {
+    setStartDate(date);
+    validateTime(date);
+  };
 
   const handleSearch = async (query: string) => {
     setSearchTerm(query);
@@ -222,7 +249,11 @@ export default function FirstPage() {
 
   const handleStartChatAndCreateAppointment = async () => {
     if (!isReady) {
-      alert("Please select users and time first.");
+      if (timeError) {
+        alert(timeError);
+      } else {
+        alert("Please select users and time first.");
+      }
       return;
     }
 
@@ -322,10 +353,16 @@ export default function FirstPage() {
                 <div className="border-2 border-indigo-100 rounded-xl p-4 bg-gray-50">
                   <DatePicker
                     selected={startDate}
-                    onChange={(date) => setStartDate(date)}
+                    onChange={handleDateChange}
                     showTimeSelect
                     minDate={new Date()}
-                    timeIntervals={15}
+                    minTime={
+                      startDate && startDate.toDateString() === new Date().toDateString()
+                        ? new Date()
+                        : new Date(new Date().setHours(0, 0, 0, 0))
+                    }
+                    maxTime={new Date(new Date().setHours(23, 59, 59, 999))}
+                    timeIntervals={1}
                     dateFormat="Pp"
                     inline
                     className="w-full"
@@ -333,7 +370,18 @@ export default function FirstPage() {
                 </div>
               )}
 
-              {startDate && (
+              {/* Time Error Message */}
+              {timeError && (
+                <div className="mt-4 p-4 bg-red-50 border-2 border-red-200 rounded-xl">
+                  <div className="flex items-center gap-2 text-red-700">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0" />
+                    <p className="text-sm font-medium">{timeError}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Selected Time Display */}
+              {startDate && !timeError && (
                 <div className="mt-4 p-4 bg-indigo-50 rounded-xl border-2 border-indigo-200">
                   <div className="flex items-center gap-2 text-indigo-700 font-medium">
                     <Clock className="w-5 h-5" />

@@ -304,6 +304,69 @@ io.on("connection", (socket: Socket) => {
     return;
   }
 
+  socket.on('call-started', async (data) => {
+    const { roomId, callerId, callerName, meetingId, timestamp } = data;
+    
+    console.log('📞 Call started by:', callerName, 'in room:', roomId);
+    
+    // Broadcast to all other users in the room
+    socket.to(roomId).emit('incoming-call', {
+      callerId,
+      callerName,
+      meetingId,
+      timestamp
+    });
+    
+    // Save call start message to database (optional)
+    try {
+      const Message = require('./models/Message'); // Adjust path to your model
+      await Message.create({
+        roomId,
+        senderId: 'system',
+        senderName: 'System',
+        content: `📞 ${callerName} started a video call`,
+        type: 'system',
+        createdAt: new Date(timestamp)
+      });
+    } catch (err) {
+      console.error('Error saving call start message:', err);
+    }
+  });
+
+  // 🎥 VIDEO CALL - When call ends
+  socket.on('call-ended', async (data) => {
+    const { roomId, callerId, callerName, duration, timestamp } = data;
+    
+    console.log('📞 Call ended by:', callerName, 'Duration:', duration);
+    
+    const minutes = Math.floor(duration / 60);
+    const seconds = duration % 60;
+    const durationText = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+    
+    // Broadcast to all users in the room
+    io.to(roomId).emit('call-ended', {
+      callerId,
+      callerName,
+      duration,
+      timestamp
+    });
+    
+    // Save call end message to database (optional)
+    try {
+      const Message = require('./models/Message'); // Adjust path to your model
+      await Message.create({
+        roomId,
+        senderId: 'system',
+        senderName: 'System',
+        content: `📞 Call ended • Duration: ${durationText}`,
+        type: 'system',
+        createdAt: new Date(timestamp)
+      });
+    } catch (err) {
+      console.error('Error saving call end message:', err);
+    }
+  });
+
   // Track sockets
   if (!userSocketMap.has(userId)) {
     userSocketMap.set(userId, []);

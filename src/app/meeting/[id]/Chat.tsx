@@ -9,6 +9,7 @@ import AISuggestionsPanel from "../../components/ui/AISuggestionsPanel";
 import React from "react";
 import { useLocale } from "../../components/provider/locale-provider";
 import VideoChatButton from '../../components/VideoChatButton';
+import CallNotification from '../../components/CallNotification';
 
 declare module "next-auth" {
   interface Session {
@@ -26,6 +27,11 @@ type ChatProps = {
   targetUserId?: string;
 };
 
+interface IncomingCall {
+  callerName: string;
+  meetingId: string;
+}
+
 export default function Chat({ roomId, targetUserId }: ChatProps) {
   const { data: session, status } = useSession();
   const { locale } = useLocale();
@@ -40,15 +46,16 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     { id: string; name: string }[]
   >([]);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const currentRoomRef = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   console.log("RENDER TYPES", {
-  messages: Array.isArray(messages),
-  onlineUsers: Array.isArray(onlineUsers),
-});
+    messages: Array.isArray(messages),
+    onlineUsers: Array.isArray(onlineUsers),
+  });
 
   // Auto-scroll when messages update
   useEffect(() => {
@@ -196,6 +203,23 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       alert("The other user has left the chat");
     };
 
+    // 🎥 VIDEO CALL LISTENERS
+    const handleIncomingCall = (data: { callerName: string; callerId: string; meetingId: string }) => {
+      console.log("📞 Incoming call:", data);
+      // Don't show notification if you're the caller
+      if (data.callerId !== session.user.id) {
+        setIncomingCall({
+          callerName: data.callerName,
+          meetingId: data.meetingId,
+        });
+      }
+    };
+
+    const handleCallEnded = (data: { callerName: string; duration: number }) => {
+      console.log("📞 Call ended:", data);
+      // This message is already sent by the caller, so we just listen for it
+    };
+
     // ✅ Attach listeners
     socket.on("initialMessages", handleInitialMessages);
     socket.on("newMessage", handleNewMessage);
@@ -203,6 +227,8 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     socket.on("messageEdited", handleMessageEdited);
     socket.on("messageDeleted", handleMessageDeleted);
     socket.on("user-left", handleUserLeft);
+    socket.on("incoming-call", handleIncomingCall);
+    socket.on("call-ended", handleCallEnded);
 
     // ✅ Cleanup listeners when room changes or component unmounts
     return () => {
@@ -213,6 +239,8 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       socket.off("messageEdited", handleMessageEdited);
       socket.off("messageDeleted", handleMessageDeleted);
       socket.off("user-left", handleUserLeft);
+      socket.off("incoming-call", handleIncomingCall);
+      socket.off("call-ended", handleCallEnded);
 
       // Leave room on cleanup
       if (currentRoomRef.current === roomId) {
@@ -278,6 +306,74 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     });
   };
 
+  // 🎥 VIDEO CALL HANDLERS
+  const handleCallStart = (callData: { meetingId: string; callerName: string; timestamp: number }) => {
+    console.log("📞 Broadcasting call start:", callData);
+    
+    // Broadcast to other users in the room
+    if (socketRef.current) {
+      socketRef.current.emit("call-started", {
+        roomId,
+        callerId: session?.user?.id,
+        callerName: callData.callerName,
+        meetingId: callData.meetingId,
+        timestamp: callData.timestamp,
+      });
+    }
+  };
+
+  const handleCallEnd = (callData: { meetingId: string; callerName: string; duration: number; timestamp: number }) => {
+    console.log("📞 Broadcasting call end:", callData);
+    
+    // Broadcast to other users
+    if (socketRef.current) {
+      socketRef.current.emit("call-ended", {
+        roomId,
+        callerId: session?.user?.id,
+        callerName: callData.callerName,
+        duration: callData.duration,
+        timestamp: callData.timestamp,
+      });
+    }
+  };
+
+  const handleSendCallMessage = (msg: string) => {
+    // Send as a system message
+    if (socketRef.current) {
+      socketRef.current.emit("sendMessage", {
+        roomId,
+        senderId: "system",
+        senderName: "System",
+        content: msg,
+        type: "system",
+        createdAt: new Date(),
+      });
+    }
+  };
+
+  const handleAcceptCall = () => {
+    if (!incomingCall) return;
+
+    const cleanMeetingId = incomingCall.meetingId.replace(/[^a-zA-Z0-9-]/g, '');
+    const videoUrl = `https://meet.jit.si/${cleanMeetingId}#userInfo.displayName="${encodeURIComponent(session?.user?.name || 'Guest')}"`;
+    
+    // Open call
+    window.open(videoUrl, 'VideoCall', 'width=1200,height=800');
+    
+    // Send system message
+    handleSendCallMessage(
+      locale === "ru" 
+        ? `📞 ${session?.user?.name} присоединился к видеозвонку ${incomingCall.callerName}` 
+        : `📞 ${session?.user?.name} joined ${incomingCall.callerName}'s video call`
+    );
+    
+    setIncomingCall(null);
+  };
+
+  const handleDeclineCall = () => {
+    setIncomingCall(null);
+  };
+
   const handleSummarize = async () => {
     if (messages.length === 0) {
       alert(
@@ -338,6 +434,16 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-indigo-50 to-slate-100 flex flex-col font-sans text-gray-800">
+      {/* 🎥 CALL NOTIFICATION OVERLAY */}
+      {incomingCall && (
+        <CallNotification
+          callerName={incomingCall.callerName}
+          meetingId={incomingCall.meetingId}
+          onAccept={handleAcceptCall}
+          onDecline={handleDeclineCall}
+        />
+      )}
+
       {/* Mobile Header */}
       <div className="lg:hidden sticky top-0 z-10 bg-white/90 backdrop-blur-md border-b-2 border-gray-200 shadow-sm px-4 py-3 flex items-center justify-between">
         <h1 className="text-lg font-semibold text-slate-700">
@@ -404,47 +510,60 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
           >
             {Array.isArray(messages) &&
               messages.map((msg) => (
-                <div
-                  key={msg._id}
-                  className={`p-2 sm:p-3 rounded-lg sm:rounded-xl shadow-sm flex flex-col justify-between transition-all duration-200 ${
-                    msg.senderId === session?.user?.id
-                      ? "bg-gradient-to-r from-blue-100 to-blue-50 border border-blue-300"
-                      : "bg-white border border-gray-300 hover:border-blue-200"
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span
-                      className={`font-semibold text-sm sm:text-base ${
+                <div key={msg._id}>
+                  {msg.senderId === "system" || msg.type === "system" ? (
+                    // 🎥 SYSTEM MESSAGE (Call notifications)
+                    <div className="flex justify-center my-2">
+                      <div className="bg-blue-100 dark:bg-blue-900/30 px-4 py-2 rounded-full">
+                        <p className="text-sm text-blue-800 dark:text-blue-200">
+                          {msg.content}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    // Regular message
+                    <div
+                      className={`p-2 sm:p-3 rounded-lg sm:rounded-xl shadow-sm flex flex-col justify-between transition-all duration-200 ${
                         msg.senderId === session?.user?.id
-                          ? "text-blue-600"
-                          : "text-slate-700"
+                          ? "bg-gradient-to-r from-blue-100 to-blue-50 border border-blue-300"
+                          : "bg-white border border-gray-300 hover:border-blue-200"
                       }`}
                     >
-                      {msg.sender?.name ||
-                        (locale === "ru" ? "Гость" : "Guest")}
-                    </span>
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`font-semibold text-sm sm:text-base ${
+                            msg.senderId === session?.user?.id
+                              ? "text-blue-600"
+                              : "text-slate-700"
+                          }`}
+                        >
+                          {msg.sender?.name ||
+                            (locale === "ru" ? "Гость" : "Guest")}
+                        </span>
 
-                    {msg.senderId === session?.user?.id && (
-                      <div className="space-x-1 sm:space-x-2 flex items-center flex-shrink-0">
-                        <button
-                          onClick={() => handleUpdate(String(msg._id))}
-                          className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-yellow-300 to-yellow-400 hover:from-yellow-400 hover:to-yellow-500 text-slate-800 font-medium shadow-sm"
-                        >
-                          {locale === "ru" ? "Редактировать" : "Edit"}
-                        </button>
-                        <button
-                          onClick={() => handleDelete(String(msg._id))}
-                          className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-red-400 to-red-500 hover:from-red-500 hover:to-red-600 text-white font-medium shadow-sm"
-                        >
-                          {locale === "ru" ? "Удалить" : "Delete"}
-                        </button>
+                        {msg.senderId === session?.user?.id && (
+                          <div className="space-x-1 sm:space-x-2 flex items-center flex-shrink-0">
+                            <button
+                              onClick={() => handleUpdate(String(msg._id))}
+                              className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-yellow-300 to-yellow-400 hover:from-yellow-400 hover:to-yellow-500 text-slate-800 font-medium shadow-sm"
+                            >
+                              {locale === "ru" ? "Редактировать" : "Edit"}
+                            </button>
+                            <button
+                              onClick={() => handleDelete(String(msg._id))}
+                              className="px-2 py-1 text-xs sm:text-sm rounded-md bg-gradient-to-r from-red-400 to-red-500 hover:from-red-500 hover:to-red-600 text-white font-medium shadow-sm"
+                            >
+                              {locale === "ru" ? "Удалить" : "Delete"}
+                            </button>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
 
-                  <span className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-800 text-sm sm:text-base">
-                    {msg.content}
-                  </span>
+                      <span className="mt-2 whitespace-pre-wrap break-words leading-relaxed text-slate-800 text-sm sm:text-base">
+                        {msg.content}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
             <div ref={messagesEndRef} />
@@ -535,10 +654,14 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
             locale={locale}
           />
         )}
+        {/* 🎥 VIDEO CHAT BUTTON WITH CALLBACKS */}
         <VideoChatButton
           meetingId={roomId}
           userName={session?.user?.name || "Guest"}
           variant="icon"
+          onCallStart={handleCallStart}
+          onCallEnd={handleCallEnd}
+          onSendMessage={handleSendCallMessage}
         />
       </div>
 
