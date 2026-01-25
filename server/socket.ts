@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import path from "path";
 dotenv.config({ path: path.resolve(process.cwd(), ".env.local") });
+import clientPromise from "../src/lib/mongodb";
 import { Server, Socket } from "socket.io";
 import http from "http";
 import express from "express";
@@ -412,6 +413,32 @@ io.on("connection", (socket: Socket) => {
     socket.emit("initialMessages", messages);
 
     broadcastRoomUsers(roomId);
+  });
+
+  socket.on('transcript:new', async (payload) => {
+    const { roomId, senderId, content, type, timestamp } = payload;
+
+    if (!roomId || !senderId || !content) return;
+
+    const client = await clientPromise;
+    const db = client.db();
+
+    const transcript = {
+      roomId,
+      senderId,
+      content,
+      type,
+      createdAt: timestamp ? new Date(timestamp) : new Date(),
+    };
+
+    const result = await db
+      .collection('videocall_transcripts')
+      .insertOne(transcript);
+
+    io.to(roomId).emit('transcript:created', {
+      ...transcript,
+      _id: result.insertedId.toString(),
+    });
   });
 
   // ✅ Leave Room

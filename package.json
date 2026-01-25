@@ -13,6 +13,7 @@
     "@auth/mongodb-adapter": "^3.11.1",
     "@clerk/clerk-sdk-node": "^4.13.23",
     "@clerk/nextjs": "^6.28.1",
+    "@deepgram/sdk": "^4.11.3",
     "@google/genai": "^1.12.0",
     "axios": "^1.11.0",
     "class-variance-authority": "^0.7.1",

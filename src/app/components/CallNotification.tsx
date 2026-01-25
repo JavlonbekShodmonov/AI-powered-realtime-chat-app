@@ -1,8 +1,8 @@
 // components/CallNotification.tsx
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { Video, X, Phone } from 'lucide-react';
+import { useState, useEffect } from "react";
+import { Video, X, Phone } from "lucide-react";
 
 interface CallNotificationProps {
   callerName: string;
@@ -11,11 +11,11 @@ interface CallNotificationProps {
   onDecline: () => void;
 }
 
-export default function CallNotification({ 
-  callerName, 
-  meetingId, 
-  onAccept, 
-  onDecline 
+export default function CallNotification({
+  callerName,
+  meetingId,
+  onAccept,
+  onDecline,
 }: CallNotificationProps) {
   const [isRinging, setIsRinging] = useState(true);
 
@@ -26,11 +26,13 @@ export default function CallNotification({
     }, 30000);
 
     // Play ringing sound (optional)
-    const audio = new Audio('/sounds/incoming-call.mp3');
+    const audio = new Audio(
+      "data:audio/mpeg;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAASAAAeMwAUFBQUFCIiIiIiIjAwMDAwPj4+Pj4+TExMTExZWVlZWVlnZ2dnZ3V1dXV1dYODg4ODkZGRkZGRn5+fn5+frKysrKy6urq6urrIyMjIyNbW1tbW1uTk5OTk8vLy8vLy//////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAHjOZTf9/AAAAAAAAAAAAAAAAAAAAAP/7kGQAAANUMEoFPeACNQV40KEYABEY41g5vAAA9RjpZxRTAImU+W8eshaFpAQgALAAYALATx/nYDYCMJ0HITQYYA7AH4c7MoGsnCMU5pnW+OQnBcDrQ9Xx7w37/d1z/mYa",
+    );
     audio.loop = true;
     audio.play().catch(() => {
       // Autoplay might be blocked
-      console.log('Audio autoplay blocked');
+      console.log("Audio autoplay blocked");
     });
 
     return () => {
@@ -44,7 +46,7 @@ export default function CallNotification({
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black bg-opacity-70 backdrop-blur-sm" />
-      
+
       {/* Notification Card */}
       <div className="relative bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-8 w-96 animate-bounce-slow">
         <button
@@ -56,7 +58,9 @@ export default function CallNotification({
 
         {/* Caller Info */}
         <div className="text-center mb-6">
-          <div className={`w-24 h-24 mx-auto mb-4 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center ${isRinging ? 'animate-pulse' : ''}`}>
+          <div
+            className={`w-24 h-24 mx-auto mb-4 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center ${isRinging ? "animate-pulse" : ""}`}
+          >
             <Video size={40} className="text-white" />
           </div>
           <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">

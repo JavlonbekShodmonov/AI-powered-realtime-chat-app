@@ -2,11 +2,13 @@
 'use client';
 
 import { useState } from 'react';
-import { Video, X, ExternalLink } from 'lucide-react';
+import { Video, X, ExternalLink, Sparkles, MessageCircle } from 'lucide-react';
+import VideoCallWithTranscription from './VideoCallWithTranscription';
 
-interface VideoChatButtonProps {
+interface VideoCallButtonProps {
   meetingId: string;
   userName?: string;
+  userId: string;
   variant?: 'icon' | 'button';
   className?: string;
   onCallStart?: (callData: { meetingId: string; callerName: string; timestamp: number }) => void;
@@ -17,23 +19,25 @@ interface VideoChatButtonProps {
 export default function VideoChatButton({ 
   meetingId, 
   userName = 'Guest',
+  userId,
   variant = 'icon',
   className = '',
   onCallStart,
   onCallEnd,
   onSendMessage
-}: VideoChatButtonProps) {
+}: VideoCallButtonProps) {
   const [showOptions, setShowOptions] = useState(false);
+  const [showEmbeddedCall, setShowEmbeddedCall] = useState(false);
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
 
-  const cleanMeetingId = meetingId.replace(/[^a-zA-Z0-9-]/g, '');
-  const videoUrl = `https://meet.jit.si/${cleanMeetingId}#userInfo.displayName="${encodeURIComponent(userName)}"&config.startWithAudioMuted=false&config.startWithVideoMuted=false`;
+  const cleanMeetingId = meetingId.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
+  const jitsiUrl = `https://meet.jit.si/${cleanMeetingId}#userInfo.displayName="${encodeURIComponent(userName)}"&config.startWithAudioMuted=false&config.startWithVideoMuted=false`;
+  const wherebyUrl = `https://whereby.com/${cleanMeetingId}?embed&displayName=${encodeURIComponent(userName)}&background=off`;
 
   const handleCallStart = () => {
     const startTime = Date.now();
     setCallStartTime(startTime);
 
-    // Notify others about call start
     if (onCallStart) {
       onCallStart({
         meetingId: cleanMeetingId,
@@ -42,7 +46,6 @@ export default function VideoChatButton({
       });
     }
 
-    // Send chat message
     if (onSendMessage) {
       onSendMessage(`📞 ${userName} started a video call`);
     }
@@ -51,14 +54,13 @@ export default function VideoChatButton({
   const startCallNewWindow = () => {
     handleCallStart();
     
-    // Open in new window/tab
+    // Use Jitsi for simple calls (works better in new window)
     const callWindow = window.open(
-      videoUrl,
+      jitsiUrl,
       'VideoCall',
       'width=1200,height=800,menubar=no,toolbar=no,location=no,status=no'
     );
 
-    // Monitor when window closes
     if (callWindow) {
       const checkClosed = setInterval(() => {
         if (callWindow.closed) {
@@ -73,15 +75,19 @@ export default function VideoChatButton({
 
   const startCallSameWindow = () => {
     handleCallStart();
-    // Open in same window
-    window.location.href = videoUrl;
+    window.location.href = jitsiUrl;
+  };
+
+  const startCallEmbedded = () => {
+    handleCallStart();
+    setShowEmbeddedCall(true);
+    setShowOptions(false);
   };
 
   const handleCallEnd = () => {
     if (callStartTime) {
-      const duration = Math.floor((Date.now() - callStartTime) / 1000); // in seconds
+      const duration = Math.floor((Date.now() - callStartTime) / 1000);
       
-      // Notify others about call end
       if (onCallEnd) {
         onCallEnd({
           meetingId: cleanMeetingId,
@@ -91,37 +97,47 @@ export default function VideoChatButton({
         });
       }
 
-      // Send chat message
       if (onSendMessage) {
         const minutes = Math.floor(duration / 60);
         const seconds = duration % 60;
-        const durationText = minutes > 0 
-          ? `${minutes}m ${seconds}s` 
-          : `${seconds}s`;
+        const durationText = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
         onSendMessage(`📞 Call ended • Duration: ${durationText}`);
       }
 
       setCallStartTime(null);
+      setShowEmbeddedCall(false);
     }
   };
 
   const copyLink = () => {
-    navigator.clipboard.writeText(videoUrl);
+    navigator.clipboard.writeText(jitsiUrl);
     alert('Video call link copied! Share it with others to join.');
     setShowOptions(false);
   };
 
-  // Options popup
+  // Embedded Video Call with Speech-to-Text & Summary
+  if (showEmbeddedCall) {
+    return (
+      <div className="fixed inset-0 z-50 bg-gray-900">
+        <VideoCallWithTranscription
+          roomName={meetingId}
+          displayName={userName}
+          userId={userId}
+          onClose={handleCallEnd}
+        />
+      </div>
+    );
+  }
+
+  // Options Modal
   if (showOptions) {
     return (
       <>
-        {/* Backdrop */}
         <div 
           className="fixed inset-0 bg-black bg-opacity-50 z-40"
           onClick={() => setShowOptions(false)}
         />
         
-        {/* Options Modal */}
         <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 w-96">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -137,13 +153,27 @@ export default function VideoChatButton({
 
           <div className="space-y-3">
             <button
+              onClick={startCallEmbedded}
+              className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg transition-colors"
+            >
+              <div className="p-2 bg-white/20 rounded">
+                <MessageCircle size={20} />
+              </div>
+              <div className="text-left flex-1">
+                <div className="font-medium">Call with AI Features</div>
+                <div className="text-xs opacity-90">Speech-to-text + Summary (FREE!)</div>
+              </div>
+              <Sparkles size={16} className="opacity-75" />
+            </button>
+
+            <button
               onClick={startCallNewWindow}
               className="w-full flex items-center gap-3 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
             >
               <ExternalLink size={20} />
               <div className="text-left">
-                <div className="font-medium">Open in New Window</div>
-                <div className="text-xs opacity-90">Recommended - Keep chatting</div>
+                <div className="font-medium">Quick Call (New Window)</div>
+                <div className="text-xs opacity-90">Jitsi Meet - No AI features</div>
               </div>
             </button>
 
@@ -153,8 +183,8 @@ export default function VideoChatButton({
             >
               <Video size={20} />
               <div className="text-left">
-                <div className="font-medium">Open Here</div>
-                <div className="text-xs opacity-90">Replace current page</div>
+                <div className="font-medium">Quick Call (Here)</div>
+                <div className="text-xs opacity-90">Jitsi Meet - Replace page</div>
               </div>
             </button>
 
@@ -171,8 +201,14 @@ export default function VideoChatButton({
               <strong>Room ID:</strong> {cleanMeetingId}
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
-              Share this ID with others to join the same call
+              💡 Use "Call with AI Features" to access:
             </p>
+            <ul className="text-xs text-gray-500 dark:text-gray-500 mt-1 ml-4 list-disc">
+              <li>Real-time speech-to-text (Browser, FREE!)</li>
+              <li>No audio uploads needed</li>
+              <li>AI-powered call summary (Gemini)</li>
+              <li>Summary whole call or specific user</li>
+            </ul>
           </div>
         </div>
       </>
@@ -185,21 +221,21 @@ export default function VideoChatButton({
       <button
         onClick={() => setShowOptions(true)}
         className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${className}`}
-        title="Start video call"
+        title="Start video call with AI transcription"
       >
         <Video size={24} className="text-blue-600 dark:text-blue-400" />
       </button>
     );
   }
 
-  // Button variant (for larger areas)
+  // Button variant
   return (
     <button
       onClick={() => setShowOptions(true)}
       className={`flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors ${className}`}
     >
       <Video size={20} />
-      <span>Start Video Call</span>
+      <span>Start AI Video Call</span>
     </button>
   );
 }

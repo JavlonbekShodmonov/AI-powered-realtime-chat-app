@@ -1,12 +1,14 @@
+// app/api/summarize/route.ts
+// COMPLETE UPDATED VERSION - Replace your entire file with this
+
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import clientPromise from "@/lib/mongodb";
 import { ObjectId } from "mongodb";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_KEY });
-const CHUNK_SIZE = 1000; // Adjust as needed
+const CHUNK_SIZE = 1000;
 
-// Utility: split text into chunks
 function chunkText(text: string, size: number) {
   const chunks = [];
   let start = 0;
@@ -17,7 +19,6 @@ function chunkText(text: string, size: number) {
   return chunks;
 }
 
-// Summarize text using Gemini, with chunking and retry logic
 async function summarizeText(text: string, prompt: string) {
   const chunks = chunkText(text, CHUNK_SIZE);
   let summaries: string[] = [];
@@ -25,7 +26,7 @@ async function summarizeText(text: string, prompt: string) {
   for (const chunk of chunks) {
     try {
       const result = await ai.models.generateContent({
-        model: "gemini-2.5-flash", // ✅ Using gemini-2.5-flash
+        model: "gemini-2.5-flash",
         contents: [{ role: "user", parts: [{ text: `${prompt}\n\n${chunk}` }] }],
       });
       const summary = result.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -33,7 +34,6 @@ async function summarizeText(text: string, prompt: string) {
     } catch (error: any) {
       console.error("❌ Chunk summarization error:", error);
       
-      // If quota exceeded, return a simple concatenation instead
       if (error.message?.includes("quota") || error.message?.includes("RESOURCE_EXHAUSTED")) {
         console.warn("⚠️ Quota exceeded, returning basic summary");
         return `Summary unavailable due to API quota limits. Here are the raw messages:\n\n${text.substring(0, 500)}...`;
@@ -42,18 +42,16 @@ async function summarizeText(text: string, prompt: string) {
     }
   }
 
-  // If multiple chunks, summarize the combined summaries
   if (summaries.length > 1) {
     try {
       const combined = summaries.join("\n");
       const finalResult = await ai.models.generateContent({
-        model: "gemini-2.5-flash", // ✅ Using gemini-2.5-flash
+        model: "gemini-2.5-flash",
         contents: [{ role: "user", parts: [{ text: `${prompt}\n\n${combined}` }] }],
       });
       return finalResult.candidates?.[0]?.content?.parts?.[0]?.text || null;
     } catch (error: any) {
       console.error("❌ Final summarization error:", error);
-      // Return the individual summaries if final combination fails
       return summaries.join("\n\n");
     }
   }
@@ -63,9 +61,9 @@ async function summarizeText(text: string, prompt: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const { roomId, userId } = await req.json();
+    const { roomId, userId, isVideoCall = false, callStartTime, callEndTime } = await req.json();
 
-    console.log("📥 Summarize request:", { roomId, userId, roomIdType: typeof roomId });
+    console.log("📥 Summarize request:", { roomId, userId, isVideoCall, roomIdType: typeof roomId });
 
     if (!roomId) {
       return NextResponse.json({ error: "roomId is required" }, { status: 400 });
@@ -73,13 +71,29 @@ export async function POST(req: NextRequest) {
 
     const client = await clientPromise;
     const db = client.db();
-    const messagesCollection = db.collection("messages");
+    
+    // Choose collection based on type
+    const messagesCollection = isVideoCall 
+      ? db.collection("videocall_speech_transcripts") 
+      : db.collection("messages");
     const usersCollection = db.collection("users");
 
-    // ✅ Fetch all messages in the room - try both string and ObjectId
+    // Fetch all messages in the room
+    let query: any = { roomId };
+    
+    // If video call, optionally filter by time range
+    if (isVideoCall && callStartTime && callEndTime) {
+      query.timestamp = {
+        $gte: callStartTime,
+        $lte: callEndTime
+      };
+    }
+    
+    console.log("🔍 Query:", query);
+    
     let allMessages = await messagesCollection
-      .find({ roomId })
-      .sort({ createdAt: 1 })
+      .find(query)
+      .sort(isVideoCall ? { timestamp: 1 } : { createdAt: 1 })
       .toArray();
 
     console.log(`📊 Found ${allMessages.length} messages with string query`);
@@ -87,9 +101,10 @@ export async function POST(req: NextRequest) {
     // If no results with string, try ObjectId
     if (allMessages.length === 0 && ObjectId.isValid(roomId)) {
       console.log("🔍 Trying ObjectId query...");
+      query.roomId = new ObjectId(roomId);
       allMessages = await messagesCollection
-        .find({ roomId: new ObjectId(roomId) })
-        .sort({ createdAt: 1 })
+        .find(query)
+        .sort(isVideoCall ? { timestamp: 1 } : { createdAt: 1 })
         .toArray();
       console.log(`📊 Found ${allMessages.length} messages with ObjectId query`);
     }
@@ -98,16 +113,36 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         fullSummary: null,
         userSummary: null,
-        message: "No messages yet",
+        message: isVideoCall ? "No video call transcripts yet" : "No messages yet",
       });
     }
 
-    // ✅ Get user names for better context
-    const senderIds = [...new Set(allMessages.map((m: any) => m.senderId))];
+    // Get user names for better context
+    let senderIds: string[] = [];
+    
+    if (isVideoCall) {
+      // For video calls, userId is already a string in the transcript
+      senderIds = [...new Set(allMessages.map((m: any) => m.userId))];
+    } else {
+      // For regular chat, senderId might be ObjectId
+      senderIds = [...new Set(allMessages.map((m: any) => m.senderId))];
+    }
+    
     console.log("👥 Unique sender IDs:", senderIds);
     
+    // Try to get user names from database
     const users = await usersCollection
-      .find({ _id: { $in: senderIds.map((id: any) => new ObjectId(id)) } })
+      .find({ 
+        _id: { 
+          $in: senderIds.map((id: any) => {
+            try {
+              return new ObjectId(id);
+            } catch {
+              return id; // Keep as string if not valid ObjectId
+            }
+          })
+        } 
+      })
       .project({ _id: 1, name: 1 })
       .toArray();
 
@@ -117,29 +152,75 @@ export async function POST(req: NextRequest) {
       users.map((u: any) => [u._id.toString(), u.name || "Guest"])
     );
 
-    // ✅ Format messages with sender names
-    const formattedMessages = allMessages.map((m: any) => ({
-      sender: userMap.get(m.senderId) || "Guest",
-      content: m.content,
-    }));
+    // For video calls, also add userName from transcript if user not in DB
+    if (isVideoCall) {
+      allMessages.forEach((m: any) => {
+        if (m.userId && m.userName && !userMap.has(m.userId)) {
+          userMap.set(m.userId, m.userName);
+        }
+      });
+    }
 
-    // Prepare texts
-    const fullChatText = formattedMessages
+    // Format messages with sender names and timestamps
+    const formattedMessages = allMessages.map((m: any) => {
+      const senderId = isVideoCall ? m.userId : m.senderId;
+      const senderName = isVideoCall 
+        ? (m.userName || userMap.get(senderId) || "Guest")
+        : (userMap.get(senderId) || "Guest");
+      
+      const content = isVideoCall ? m.text : m.content;
+      
+      return {
+        sender: senderName,
+        senderId: senderId,
+        content: content,
+        timestamp: isVideoCall ? m.timestamp : m.createdAt,
+        type: m.type || "text",
+      };
+    });
+
+    // Filter out invalid messages
+    const validMessages = formattedMessages.filter((m: any) => {
+      return m.content && 
+             m.content !== 'undefined' && 
+             typeof m.content === 'string' &&
+             m.content.trim().length > 0 &&
+             m.sender && 
+             m.sender !== 'undefined';
+    });
+
+    console.log(`📊 Total messages: ${formattedMessages.length}, Valid: ${validMessages.length}`);
+
+    if (validMessages.length === 0) {
+      return NextResponse.json({
+        fullSummary: "No valid conversation to summarize. Please ensure the conversation has started.",
+        userSummary: null,
+        message: "No valid messages found",
+      });
+    }
+
+    // Prepare prompt based on context
+    const contextPrompt = isVideoCall
+      ? "video call conversation"
+      : "chat conversation";
+
+    const fullChatText = validMessages
       .map((m) => `${m.sender}: ${m.content}`)
       .join("\n");
 
     console.log("📝 Full chat text length:", fullChatText.length);
+    console.log("📝 First 200 chars:", fullChatText.substring(0, 200));
 
-    // ✅ Filter by userId if provided
+    // Filter by userId if provided
     let userText = null;
     let userName = "User";
     
     if (userId) {
-      const userMessages = formattedMessages.filter(
-        (m, idx) => allMessages[idx].senderId === userId
+      const userMessages = validMessages.filter(
+        (m: any) => m.senderId === userId
       );
       
-      userName = userMap.get(userId) || "User";
+      userName = userMessages[0]?.sender || userMap.get(userId) || "User";
       userText = userMessages
         .map((m) => `${m.sender}: ${m.content}`)
         .join("\n");
@@ -151,19 +232,30 @@ export async function POST(req: NextRequest) {
     try {
       console.log("🤖 Starting AI summarization...");
       
+      const fullPrompt = isVideoCall
+        ? `Summarize this video call conversation concisely. Include:
+           1. Main topics discussed
+           2. Key decisions or action items
+           3. Important questions raised
+           4. Overall tone and participation level
+           Keep it clear and actionable.`
+        : `Summarize this chat conversation as concisely as possible without losing important information. Include the main topics discussed and key points.`;
+
+      const userPrompt = isVideoCall
+        ? `Summarize ${userName}'s contributions in this video call. Focus on:
+           1. Their main talking points
+           2. Questions they asked
+           3. Decisions or suggestions they made
+           4. Their level of participation`
+        : `Summarize all messages from ${userName} as concisely as possible. Focus on their main contributions, questions, and key points.`;
+
       // Run summaries in parallel if userText exists
       const [fullSummary, userSummary] = await Promise.all([
         userId
           ? Promise.resolve(null)
-          : summarizeText(
-              fullChatText,
-              "Summarize this full chat conversation as concisely as possible without losing important information. Include the main topics discussed and key points."
-            ),
+          : summarizeText(fullChatText, fullPrompt),
         userText
-          ? summarizeText(
-              userText,
-              `Summarize all messages from ${userName} as concisely as possible. Focus on their main contributions, questions, and key points.`
-            )
+          ? summarizeText(userText, userPrompt)
           : Promise.resolve(null),
       ]);
 
@@ -173,11 +265,13 @@ export async function POST(req: NextRequest) {
         fullSummary,
         userSummary,
         message: "Summary generated successfully",
+        isVideoCall,
+        messageCount: validMessages.length,
+        participantCount: senderIds.length,
       });
     } catch (err: any) {
       console.error("❌ Summarization AI error:", err);
       
-      // ✅ Handle quota errors gracefully
       if (err.message?.includes("quota") || err.message?.includes("RESOURCE_EXHAUSTED")) {
         return NextResponse.json({
           error: "API quota exceeded. Please try again later or upgrade your plan.",
@@ -200,6 +294,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { 
         error: `Internal server error: ${err.message}`, 
+        details: err.stack,
         fullSummary: null, 
         userSummary: null 
       },

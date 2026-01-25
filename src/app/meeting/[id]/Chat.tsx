@@ -8,8 +8,8 @@ import "next-auth";
 import AISuggestionsPanel from "../../components/ui/AISuggestionsPanel";
 import React from "react";
 import { useLocale } from "../../components/provider/locale-provider";
-import VideoChatButton from '../../components/VideoChatButton';
-import CallNotification from '../../components/CallNotification';
+import VideoChatButton from "../../components/VideoChatButton";
+import CallNotification from "../../components/CallNotification";
 
 declare module "next-auth" {
   interface Session {
@@ -185,7 +185,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       setMessages((prev) => {
         if (!Array.isArray(prev)) return [];
         return prev.map((m) =>
-          m._id === updated._id ? { ...m, ...updated } : m
+          m._id === updated._id ? { ...m, ...updated } : m,
         );
       });
     };
@@ -204,7 +204,11 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     };
 
     // 🎥 VIDEO CALL LISTENERS
-    const handleIncomingCall = (data: { callerName: string; callerId: string; meetingId: string }) => {
+    const handleIncomingCall = (data: {
+      callerName: string;
+      callerId: string;
+      meetingId: string;
+    }) => {
       console.log("📞 Incoming call:", data);
       // Don't show notification if you're the caller
       if (data.callerId !== session.user.id) {
@@ -215,7 +219,10 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       }
     };
 
-    const handleCallEnded = (data: { callerName: string; duration: number }) => {
+    const handleCallEnded = (data: {
+      callerName: string;
+      duration: number;
+    }) => {
       console.log("📞 Call ended:", data);
       // This message is already sent by the caller, so we just listen for it
     };
@@ -293,7 +300,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     setMessages((prev) =>
       Array.isArray(prev)
         ? prev.map((m) => (m._id === id ? { ...m, content: newText } : m))
-        : prev
+        : prev,
     );
   };
 
@@ -307,9 +314,13 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   };
 
   // 🎥 VIDEO CALL HANDLERS
-  const handleCallStart = (callData: { meetingId: string; callerName: string; timestamp: number }) => {
+  const handleCallStart = (callData: {
+    meetingId: string;
+    callerName: string;
+    timestamp: number;
+  }) => {
     console.log("📞 Broadcasting call start:", callData);
-    
+
     // Broadcast to other users in the room
     if (socketRef.current) {
       socketRef.current.emit("call-started", {
@@ -322,9 +333,14 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     }
   };
 
-  const handleCallEnd = (callData: { meetingId: string; callerName: string; duration: number; timestamp: number }) => {
+  const handleCallEnd = (callData: {
+    meetingId: string;
+    callerName: string;
+    duration: number;
+    timestamp: number;
+  }) => {
     console.log("📞 Broadcasting call end:", callData);
-    
+
     // Broadcast to other users
     if (socketRef.current) {
       socketRef.current.emit("call-ended", {
@@ -354,19 +370,19 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   const handleAcceptCall = () => {
     if (!incomingCall) return;
 
-    const cleanMeetingId = incomingCall.meetingId.replace(/[^a-zA-Z0-9-]/g, '');
-    const videoUrl = `https://meet.jit.si/${cleanMeetingId}#userInfo.displayName="${encodeURIComponent(session?.user?.name || 'Guest')}"`;
-    
+    const cleanMeetingId = incomingCall.meetingId.replace(/[^a-zA-Z0-9-]/g, "");
+    const videoUrl = `https://meet.jit.si/${cleanMeetingId}#userInfo.displayName="${encodeURIComponent(session?.user?.name || "Guest")}"`;
+
     // Open call
-    window.open(videoUrl, 'VideoCall', 'width=1200,height=800');
-    
+    window.open(videoUrl, "VideoCall", "width=1200,height=800");
+
     // Send system message
     handleSendCallMessage(
-      locale === "ru" 
-        ? `📞 ${session?.user?.name} присоединился к видеозвонку ${incomingCall.callerName}` 
-        : `📞 ${session?.user?.name} joined ${incomingCall.callerName}'s video call`
+      locale === "ru"
+        ? `📞 ${session?.user?.name} присоединился к видеозвонку ${incomingCall.callerName}`
+        : `📞 ${session?.user?.name} joined ${incomingCall.callerName}'s video call`,
     );
-    
+
     setIncomingCall(null);
   };
 
@@ -379,7 +395,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       alert(
         locale === "ru"
           ? "Нет сообщений для суммирования"
-          : "No messages to summarize"
+          : "No messages to summarize",
       );
       return;
     }
@@ -412,7 +428,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       setSummary(
         `Failed to summarize: ${
           error instanceof Error ? error.message : "Unknown error"
-        }`
+        }`,
       );
     } finally {
       setLoadingSummary(false);
@@ -631,8 +647,8 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                 ? "Суммируется..."
                 : "Summarizing..."
               : locale === "ru"
-              ? "Суммировать"
-              : "Summarize"}
+                ? "Суммировать"
+                : "Summarize"}
           </button>
 
           <div className="w-0 h-0 border-l-[8px] sm:border-l-[10px] border-r-[8px] sm:border-r-[10px] border-b-[8px] sm:border-b-[10px] border-l-transparent border-r-transparent border-b-indigo-500"></div>
@@ -657,6 +673,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
         {/* 🎥 VIDEO CHAT BUTTON WITH CALLBACKS */}
         <VideoChatButton
           meetingId={roomId}
+          userId={session?.user?.id || ""}
           userName={session?.user?.name || "Guest"}
           variant="icon"
           onCallStart={handleCallStart}

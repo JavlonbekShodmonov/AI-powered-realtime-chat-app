@@ -217,28 +217,61 @@ export async function POST(req: NextRequest) {
     // Reverse to get chronological order
     recentMessages = recentMessages.reverse();
 
-    // Get user names
+    // ✅ FIX: Safe conversion of senderIds to ObjectId
     const senderIds = [...new Set(recentMessages.map((m: any) => m.senderId))];
-    const users = await usersCollection
-      .find({ _id: { $in: senderIds.map((id: any) => new ObjectId(id)) } })
-      .project({ _id: 1, name: 1 })
-      .toArray();
+    
+    // Convert to ObjectId only if valid, otherwise keep as string
+    const validObjectIds: ObjectId[] = [];
+    const stringIds: string[] = [];
+    
+    senderIds.forEach((id: any) => {
+      if (typeof id === 'string' && ObjectId.isValid(id)) {
+        try {
+          validObjectIds.push(new ObjectId(id));
+          stringIds.push(id);
+        } catch (e) {
+          // If conversion fails, treat as string
+          stringIds.push(id);
+        }
+      } else if (id instanceof ObjectId) {
+        validObjectIds.push(id);
+        stringIds.push(id.toString());
+      } else {
+        // Keep as is if not string or ObjectId
+        stringIds.push(String(id));
+      }
+    });
 
-    const userMap = new Map(
-      users.map((u: any) => [u._id.toString(), u.name || "Guest"])
-    );
+    // ✅ Query users with ObjectIds
+    const users = validObjectIds.length > 0 
+      ? await usersCollection
+          .find({ _id: { $in: validObjectIds } })
+          .project({ _id: 1, name: 1 })
+          .toArray()
+      : [];
+
+    // ✅ Create userMap with both ObjectId and string representations
+    const userMap = new Map<string, string>();
+    users.forEach((u: any) => {
+      const idStr = u._id.toString();
+      userMap.set(idStr, u.name || "Guest");
+    });
 
     // Format conversation
     const conversation = recentMessages
       .map((m: any) => {
-        const senderName = userMap.get(m.senderId) || "Guest";
-        const isCurrentUser = m.senderId === userId;
+        const senderId = m.senderId instanceof ObjectId ? m.senderId.toString() : String(m.senderId);
+        const senderName = userMap.get(senderId) || "Guest";
+        const isCurrentUser = senderId === userId || m.senderId === userId;
         return `${isCurrentUser ? "You" : senderName}: ${m.content}`;
       })
       .join("\n");
 
     const userMessageCount = recentMessages.filter(
-      (m: any) => m.senderId === userId
+      (m: any) => {
+        const senderId = m.senderId instanceof ObjectId ? m.senderId.toString() : String(m.senderId);
+        return senderId === userId || m.senderId === userId;
+      }
     ).length;
 
     try {
@@ -297,6 +330,7 @@ export async function POST(req: NextRequest) {
     }
   } catch (err: any) {
     console.error("❌ API error:", err);
+    console.error("❌ Error stack:", err.stack);
     return NextResponse.json(
       { 
         error: `Internal server error: ${err.message}`,

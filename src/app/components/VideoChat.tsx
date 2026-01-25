@@ -9,17 +9,26 @@ interface VideoChatProps {
   onClose?: () => void;
 }
 
-export default function VideoChat({ roomName, displayName = 'Guest', onClose }: VideoChatProps) {
+export default function VideoChat({ 
+  roomName, 
+  displayName = 'Guest', 
+  onClose 
+}: VideoChatProps) {
   const [isLoading, setIsLoading] = useState(true);
 
-  // Clean room name
+  // Clean room name - Jitsi requires alphanumeric and hyphens only
   const cleanRoom = roomName.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
   
-  // Using Whereby's free embed service
-  const wherebyUrl = `https://whereby.com/${cleanRoom}?embed&displayName=${encodeURIComponent(displayName)}&background=off`;
+  // Jitsi Meet URL with proper configuration
+  const jitsiUrl = `https://meet.jit.si/${cleanRoom}` +
+    `#config.prejoinPageEnabled=false` +  // Skip lobby
+    `&config.startWithAudioMuted=false` + // Start with audio
+    `&config.startWithVideoMuted=false` + // Start with video
+    `&userInfo.displayName="${encodeURIComponent(displayName)}"`;
 
   useEffect(() => {
-    const timer = setTimeout(() => setIsLoading(false), 3000);
+    // Set loading to false after a short delay
+    const timer = setTimeout(() => setIsLoading(false), 2000);
     return () => clearTimeout(timer);
   }, []);
 
@@ -33,16 +42,28 @@ export default function VideoChat({ roomName, displayName = 'Guest', onClose }: 
             </div>
             <p className="text-xl mb-2">Connecting to video call...</p>
             <p className="text-sm text-gray-400">Please allow camera and microphone access</p>
+            <p className="text-xs text-gray-500 mt-2">Powered by Jitsi Meet - Free & Unlimited</p>
           </div>
         </div>
       )}
+      
       <iframe
-        src={wherebyUrl}
-        allow="camera; microphone; fullscreen; speaker; display-capture"
+        src={jitsiUrl}
+        allow="camera; microphone; fullscreen; speaker; display-capture; autoplay"
         className="w-full h-full border-0"
-        title="Video Chat"
+        title="Video Chat - Jitsi Meet"
         onLoad={() => setIsLoading(false)}
+        sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-presentation"
       />
+      
+      {onClose && (
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg shadow-lg transition-colors z-20"
+        >
+          End Call
+        </button>
+      )}
     </div>
   );
 }
