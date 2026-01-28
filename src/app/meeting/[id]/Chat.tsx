@@ -10,6 +10,7 @@ import React from "react";
 import { useLocale } from "../../components/provider/locale-provider";
 import VideoChatButton from "../../components/VideoChatButton";
 import CallNotification from "../../components/CallNotification";
+import VideoCallWithTranscription from "@/app/components/VideoCallWithTranscription";
 
 declare module "next-auth" {
   interface Session {
@@ -37,6 +38,8 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   const { locale } = useLocale();
   const router = useRouter();
   const [showAIHelper, setShowAIHelper] = useState(true);
+  const [showEmbeddedCall, setShowEmbeddedCall] = useState(false);
+  const [callStartTime, setCallStartTime] = useState<number | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [summary, setSummary] = useState("");
@@ -370,20 +373,55 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   const handleAcceptCall = () => {
     if (!incomingCall) return;
 
-    const cleanMeetingId = incomingCall.meetingId.replace(/[^a-zA-Z0-9-]/g, "");
-    const videoUrl = `https://meet.jit.si/${cleanMeetingId}#userInfo.displayName="${encodeURIComponent(session?.user?.name || "Guest")}"`;
+    console.log("✅ Joining embedded call with AI features");
 
-    // Open call
-    window.open(videoUrl, "VideoCall", "width=1200,height=800");
+    // ✅ Join the embedded call with transcription/summary features
+    setShowEmbeddedCall(true);
+    setCallStartTime(Date.now());
 
-    // Send system message
+    // Send join message
     handleSendCallMessage(
       locale === "ru"
-        ? `📞 ${session?.user?.name} присоединился к видеозвонку ${incomingCall.callerName}`
-        : `📞 ${session?.user?.name} joined ${incomingCall.callerName}'s video call`,
+        ? `📞 ${session?.user?.name} присоединился к видеозвонку`
+        : `📞 ${session?.user?.name} joined the video call`,
     );
 
+    // Clear the notification
     setIncomingCall(null);
+  };
+
+  const handleCloseEmbeddedCall = () => {
+    console.log("📞 Closing embedded video call");
+
+    if (callStartTime) {
+      const duration = Math.floor((Date.now() - callStartTime) / 1000);
+
+      // Broadcast call end to other users
+      if (socketRef.current) {
+        socketRef.current.emit("call-ended", {
+          roomId,
+          callerId: session?.user?.id,
+          callerName: session?.user?.name || "Guest",
+          duration,
+          timestamp: Date.now(),
+        });
+      }
+
+      // Send leave message
+      const minutes = Math.floor(duration / 60);
+      const seconds = duration % 60;
+      const durationText =
+        minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+      handleSendCallMessage(
+        locale === "ru"
+          ? `📞 ${session?.user?.name} покинул звонок • Длительность: ${durationText}`
+          : `📞 ${session?.user?.name} left the call • Duration: ${durationText}`,
+      );
+
+      setCallStartTime(null);
+    }
+
+    setShowEmbeddedCall(false);
   };
 
   const handleDeclineCall = () => {
@@ -434,6 +472,20 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       setLoadingSummary(false);
     }
   };
+
+  // ✅ Render embedded video call if active
+  if (showEmbeddedCall && session?.user) {
+    return (
+      <div className="fixed inset-0 z-50 bg-gray-900">
+        <VideoCallWithTranscription
+          roomName={roomId}
+          displayName={session.user.name || "Guest"}
+          userId={session.user.id!}
+          onClose={handleCloseEmbeddedCall}
+        />
+      </div>
+    );
+  }
 
   if (status === "loading") {
     return (

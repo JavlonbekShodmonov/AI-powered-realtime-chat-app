@@ -1,8 +1,8 @@
 // components/VideoChatButton.tsx
 'use client';
 
-import { useState } from 'react';
-import { Video, X, ExternalLink, Sparkles, MessageCircle } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Video, X, ExternalLink, Sparkles, MessageCircle, Users } from 'lucide-react';
 import VideoCallWithTranscription from './VideoCallWithTranscription';
 
 interface VideoCallButtonProps {
@@ -11,6 +11,7 @@ interface VideoCallButtonProps {
   userId: string;
   variant?: 'icon' | 'button';
   className?: string;
+  isOrganizer?: boolean;
   onCallStart?: (callData: { meetingId: string; callerName: string; timestamp: number }) => void;
   onCallEnd?: (callData: { meetingId: string; callerName: string; duration: number; timestamp: number }) => void;
   onSendMessage?: (message: string) => void;
@@ -22,6 +23,7 @@ export default function VideoChatButton({
   userId,
   variant = 'icon',
   className = '',
+  isOrganizer = false,
   onCallStart,
   onCallEnd,
   onSendMessage
@@ -31,8 +33,9 @@ export default function VideoChatButton({
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
 
   const cleanMeetingId = meetingId.replace(/[^a-zA-Z0-9-]/g, '-').toLowerCase();
-  const jitsiUrl = `https://meet.jit.si/${cleanMeetingId}#userInfo.displayName="${encodeURIComponent(userName)}"&config.startWithAudioMuted=false&config.startWithVideoMuted=false`;
-  const wherebyUrl = `https://whereby.com/${cleanMeetingId}?embed&displayName=${encodeURIComponent(userName)}&background=off`;
+  
+  // ✅ Use the fixed Jitsi server without time limit
+  const jitsiUrl = `https://meet.ffmuc.net/${cleanMeetingId}#userInfo.displayName="${encodeURIComponent(userName)}"&config.startWithAudioMuted=false&config.startWithVideoMuted=false&config.prejoinPageEnabled=false`;
 
   const handleCallStart = () => {
     const startTime = Date.now();
@@ -47,14 +50,13 @@ export default function VideoChatButton({
     }
 
     if (onSendMessage) {
-      onSendMessage(`📞 ${userName} started a video call`);
+      onSendMessage(`📞 ${userName} started a video call with AI features`);
     }
   };
 
   const startCallNewWindow = () => {
     handleCallStart();
     
-    // Use Jitsi for simple calls (works better in new window)
     const callWindow = window.open(
       jitsiUrl,
       'VideoCall',
@@ -101,7 +103,7 @@ export default function VideoChatButton({
         const minutes = Math.floor(duration / 60);
         const seconds = duration % 60;
         const durationText = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-        onSendMessage(`📞 Call ended • Duration: ${durationText}`);
+        onSendMessage(`📞 ${userName} left the call • Duration: ${durationText}`);
       }
 
       setCallStartTime(null);
@@ -138,7 +140,7 @@ export default function VideoChatButton({
           onClick={() => setShowOptions(false)}
         />
         
-        <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 w-96">
+        <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 w-96 max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
               Start Video Call
@@ -152,6 +154,7 @@ export default function VideoChatButton({
           </div>
 
           <div className="space-y-3">
+            {/* Primary option: Start with AI features */}
             <button
               onClick={startCallEmbedded}
               className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg transition-colors"
@@ -160,7 +163,7 @@ export default function VideoChatButton({
                 <MessageCircle size={20} />
               </div>
               <div className="text-left flex-1">
-                <div className="font-medium">Call with AI Features</div>
+                <div className="font-medium">Start Call with AI Features</div>
                 <div className="text-xs opacity-90">Speech-to-text + Summary (FREE!)</div>
               </div>
               <Sparkles size={16} className="opacity-75" />
@@ -206,8 +209,9 @@ export default function VideoChatButton({
             <ul className="text-xs text-gray-500 dark:text-gray-500 mt-1 ml-4 list-disc">
               <li>Real-time speech-to-text (Browser, FREE!)</li>
               <li>No audio uploads needed</li>
-              <li>AI-powered call summary (Gemini)</li>
-              <li>Summary whole call or specific user</li>
+              <li>Live transcription visible to ALL participants</li>
+              <li>AI-powered call summary (Anyone can generate)</li>
+              <li>No 5-minute time limit!</li>
             </ul>
           </div>
         </div>
@@ -220,7 +224,7 @@ export default function VideoChatButton({
     return (
       <button
         onClick={() => setShowOptions(true)}
-        className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ${className}`}
+        className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative ${className}`}
         title="Start video call with AI transcription"
       >
         <Video size={24} className="text-blue-600 dark:text-blue-400" />
