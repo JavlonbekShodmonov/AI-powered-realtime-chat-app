@@ -9,11 +9,14 @@ import { ObjectId } from "mongodb";
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_KEY });
 const CHUNK_SIZE = 1000;
 
-// ✅ ADDED: Multilingual language detection
+// ✅ GREATLY IMPROVED: Smart multilingual language detection with better scoring
 function detectLanguage(text: string): string {
   if (!text || text.length < 10) return 'English';
   
-  // Character set detection
+  const lowerText = text.toLowerCase();
+  const scores: { [key: string]: number } = {};
+
+  // Character set detection (high confidence - immediate return)
   if (/[\u4e00-\u9fa5]/.test(text)) return 'Chinese';
   if (/[\u0600-\u06FF]/.test(text)) return 'Arabic';
   if (/[\u3040-\u309F\u30A0-\u30FF]/.test(text)) return 'Japanese';
@@ -22,62 +25,114 @@ function detectLanguage(text: string): string {
   if (/[\u0590-\u05FF]/.test(text)) return 'Hebrew';
   if (/[\u0370-\u03FF]/.test(text)) return 'Greek';
   
-  // Cyrillic detection with language distinction
+  // ✅ CRITICAL FIX: Latin-based languages FIRST (before Cyrillic)
+  // This prevents Cyrillic from overriding Latin script languages
+  
+  // Uzbek Latin - VERY specific patterns
+  const uzbekLatinPatterns = [
+    /\b(o'zbekiston|o'zbek|bo'lish|qilish|qilmoq|bo'lmoq|kerak|mumkin|shunday|bugun|ertaga|kecha|hozir)\b/gi,
+    /\b(salom|xayr|rahmat|iltimos|ha|yo'q|nima|qanday|qachon|qayer|kim|nima\s+uchun)\b/gi,
+    /\b(men|sen|u|biz|siz|ular|mening|sening|uning|bizning|sizning|ularning)\b/gi,
+    /\b(qil|bo'l|ol|ber|ket|kel|o'qi|yoz|gap|ish|kun|vaqt|joy)\b/gi,
+  ];
+  
+  let uzbekLatinScore = 0;
+  uzbekLatinPatterns.forEach(pattern => {
+    uzbekLatinScore += (lowerText.match(pattern) || []).length * 15;
+  });
+  
+  // Apostrophe usage is VERY characteristic of Uzbek Latin
+  const apostropheCount = (text.match(/[a-z]'[a-z]/gi) || []).length;
+  uzbekLatinScore += apostropheCount * 10;
+  
+  scores['Uzbek'] = uzbekLatinScore;
+  
+  // Turkmen - specific characters and words
+  const turkmenChars = (text.match(/[şžäňöüý]/g) || []).length;
+  const turkmenWords = (lowerText.match(/\b(türkmen|türkmenistan|bolmak|etmek|diýmek|men|sen|ol|biz|siz|olar|hem|üçin)\b/g) || []).length;
+  scores['Turkmen'] = turkmenChars * 8 + turkmenWords * 15;
+  
+  // Azerbaijani - specific patterns
+  const azerbaijaniChars = (text.match(/[əçğıöşü]/g) || []).length;
+  const azerbaijaniWords = (lowerText.match(/\b(azərbaycan|olmaq|etmək|demək|mən|sən|o|biz|siz|onlar|və|üçün|necə|nə|kim|niyə)\b/g) || []).length;
+  scores['Azerbaijani'] = azerbaijaniChars * 8 + azerbaijaniWords * 15;
+  
+  // Turkish - specific patterns
+  const turkishWords = (lowerText.match(/\b(türk|türkiye|olmak|etmek|demek|ben|sen|o|biz|siz|onlar|ve|için|nasıl|ne|kim|neden|niye|şey|gibi|çok|var|yok)\b/g) || []).length;
+  scores['Turkish'] = turkishWords * 12;
+  
+  // ✅ NOW check Cyrillic (after Latin languages scored)
   if (/[\u0400-\u04FF]/.test(text)) {
-    const lowerText = text.toLowerCase();
+    // Uzbek Cyrillic - VERY specific characters
+    const uzbekCyrillicChars = (text.match(/[ўқғҳ]/g) || []).length;
+    const uzbekCyrillicWords = (lowerText.match(/\b(ўзбекистон|ўзбек|қилиш|қилмоқ|бўлиш|бўлмоқ|керак|мумкин|шундай|бугун|эртага|кеча|ҳозир)\b/g) || []).length;
+    scores['Uzbek'] = (scores['Uzbek'] || 0) + uzbekCyrillicChars * 20 + uzbekCyrillicWords * 18;
     
-    // Uzbek Cyrillic (ў, қ, ғ, ҳ)
-    if (/[ўқғҳ]/.test(text)) return 'Uzbek';
-    
-    // Kazakh (ә, ғ, қ, ң, ө, ұ, ү, һ, і)
-    if (/[әғқңөұүһі]/.test(text)) return 'Kazakh';
+    // Kazakh - specific characters
+    const kazakhChars = (text.match(/[әғқңөұүһі]/g) || []).length;
+    const kazakhWords = (lowerText.match(/\b(қазақ|қазақстан|болу|ету|айту|мен|сен|ол|біз|сіз|олар|және|үшін|қалай|не|кім|неге|неліктен)\b/g) || []).length;
+    scores['Kazakh'] = kazakhChars * 15 + kazakhWords * 18;
     
     // Kyrgyz
-    if (/[үөң]/.test(text) && /\b(менин|сенин|биздин)\b/.test(lowerText)) return 'Kyrgyz';
+    const kyrgyzWords = (lowerText.match(/\b(кыргыз|кыргызстан|болуу|кылуу|айтуу|мен|сен|ал|биз|силер|алар|жана|үчүн|кандай|эмне|ким|эмнеге)\b/g) || []).length;
+    scores['Kyrgyz'] = kyrgyzWords * 18;
     
-    // Tajik (ӣ, ӯ, ҳ, қ, ғ, ҷ)
-    if (/[ӣӯҳқғҷ]/.test(text) || /\b(ман|ту|ӯ|мо|шумо)\b/.test(lowerText)) return 'Tajik';
+    // Tajik - specific characters and words
+    const tajikChars = (text.match(/[ӣӯҳқғҷ]/g) || []).length;
+    const tajikWords = (lowerText.match(/\b(тоҷик|тоҷикистон|будан|кардан|гуфтан|ман|ту|ӯ|мо|шумо|онҳо|ва|барои|чӣ|кӣ|чаро)\b/g) || []).length;
+    scores['Tajik'] = tajikChars * 15 + tajikWords * 18;
     
-    // Ukrainian (є, і, ї, ґ)
-    if (/[єіїґ]/.test(text)) return 'Ukrainian';
+    // Ukrainian
+    const ukrainianChars = (text.match(/[єіїґ]/g) || []).length;
+    const ukrainianWords = (lowerText.match(/\b(український|україна|бути|робити|казати|я|ти|він|вона|воно|ми|ви|вони|і|та|для|як|що|хто|чому)\b/g) || []).length;
+    scores['Ukrainian'] = ukrainianChars * 15 + ukrainianWords * 18;
     
-    // Russian
-    if (/\b(и|в|не|на|с|по|за|к|из|у|что|это|как)\b/.test(lowerText)) return 'Russian';
-    
-    return 'Russian'; // Default Cyrillic
+    // Russian - ONLY if no other Cyrillic language detected
+    // Use VERY specific Russian-only words (not shared with other Cyrillic languages)
+    const russianOnlyWords = (lowerText.match(/\b(россия|российский|быть|делать|говорить|сказать|я|ты|он|она|оно|мы|вы|они|это|этот|тот|который|такой|весь|самый|другой|новый|большой|должен|можно|нужно|хорошо|плохо|здесь|там|сейчас|потом|всегда|никогда|очень|более|менее|если|когда|где|куда|откуда|почему|зачем|как|чтобы|или|либо|ведь|даже|уже|еще|только|просто|конечно|наверное|может|будет|есть|нет)\b/g) || []).length;
+    scores['Russian'] = russianOnlyWords * 5; // MUCH lower weight than before
   }
   
-  // Latin-based language detection
-  const lowerText = text.toLowerCase();
+  // Spanish - specific words
+  const spanishWords = (lowerText.match(/\b(español|españa|ser|estar|hacer|decir|yo|tú|él|ella|nosotros|vosotros|ellos|ellas|el|la|los|las|un|una|y|o|pero|de|en|por|para|con|qué|cómo|cuándo|dónde|quién|por\s+qué|porque|muy|más|menos|todo|nada|algo|siempre|nunca)\b/g) || []).length;
+  scores['Spanish'] = spanishWords * 12;
   
-  // Uzbek Latin (o', bo', yo', qo', so', to', do')
-  if (/\b(o'|bo'|yo'|qo'|so'|to'|do'|siz|biz|ular|shunday)\b/.test(lowerText)) return 'Uzbek';
-  
-  // Turkmen (ş, ž, ä, ň, ö, ü, ý)
-  if (/[şžäňöüý]/.test(text) && /\b(men|sen|ol|biz|siz|olar)\b/.test(lowerText)) return 'Turkmen';
-  
-  // Azerbaijani (ə, ç, ğ, ı, ö, ş, ü)
-  if (/[əçğıöşü]/.test(text) && /\b(mən|sən|o|biz|siz|onlar)\b/.test(lowerText)) return 'Azerbaijani';
-  
-  // Turkish
-  if (/[çğıöşü]/.test(text) && /\b(ben|sen|o|biz|siz|onlar|ve|bir)\b/.test(lowerText)) return 'Turkish';
-  
-  // Spanish
-  if (/\b(el|la|los|las|un|una|y|o|de|en|que|por|es|está)\b/.test(lowerText)) return 'Spanish';
-  
-  // French
-  if (/\b(le|la|les|un|une|et|ou|de|à|dans|que|pour|est)\b/.test(lowerText)) return 'French';
+  // French  
+  const frenchWords = (lowerText.match(/\b(français|france|être|avoir|faire|dire|je|tu|il|elle|nous|vous|ils|elles|le|la|les|un|une|des|et|ou|mais|de|à|dans|pour|avec|ce|cette|quel|comment|quand|où|qui|pourquoi|parce\s+que|très|plus|moins|tout|rien|quelque|toujours|jamais)\b/g) || []).length;
+  scores['French'] = frenchWords * 12;
   
   // German
-  if (/\b(der|die|das|ein|eine|und|oder|von|in|zu|für|ist)\b/.test(lowerText)) return 'German';
+  const germanWords = (lowerText.match(/\b(deutsch|deutschland|sein|haben|machen|sagen|ich|du|er|sie|es|wir|ihr|der|die|das|ein|eine|und|oder|aber|von|in|zu|für|mit|dieser|welcher|wie|was|wann|wo|wer|warum|weil|sehr|mehr|weniger|alles|nichts|etwas|immer|niemals)\b/g) || []).length;
+  scores['German'] = germanWords * 12;
   
   // Italian
-  if (/\b(il|lo|la|un|una|e|o|di|in|che|per|è)\b/.test(lowerText)) return 'Italian';
+  const italianWords = (lowerText.match(/\b(italiano|italia|essere|avere|fare|dire|io|tu|lui|lei|noi|voi|loro|il|lo|la|un|una|e|o|ma|di|in|per|con|questo|quale|come|cosa|quando|dove|chi|perché|perchè|molto|più|meno|tutto|niente|qualcosa|sempre|mai)\b/g) || []).length;
+  scores['Italian'] = italianWords * 12;
   
   // Portuguese
-  if (/\b(o|a|os|as|um|uma|e|ou|de|em|que|para|é)\b/.test(lowerText)) return 'Portuguese';
+  const portugueseWords = (lowerText.match(/\b(português|portugal|brasil|ser|estar|ter|fazer|dizer|eu|tu|você|ele|ela|nós|vós|vocês|eles|elas|o|a|os|as|um|uma|e|ou|mas|de|em|por|para|com|este|qual|como|o\s+que|quando|onde|quem|por\s+que|porque|muito|mais|menos|tudo|nada|algo|sempre|nunca)\b/g) || []).length;
+  scores['Portuguese'] = portugueseWords * 12;
   
-  return 'English'; // Default
+  // English - ONLY very specific English words
+  const englishWords = (lowerText.match(/\b(english|the|a|an|and|or|but|of|in|to|for|with|this|that|these|those|what|when|where|how|why|who|which|i|you|he|she|it|we|they|am|is|are|was|were|been|being|have|has|had|do|does|did|will|would|could|should|can|may|might|must|very|more|most|all|some|any|no|not|yes|always|never|sometimes|here|there|now|then)\b/g) || []).length;
+  scores['English'] = englishWords * 4; // Lower weight
+  
+  // ✅ Calculate winner
+  const maxScore = Math.max(...Object.values(scores));
+  
+  console.log('🔍 Language detection scores:', scores);
+  console.log('🔍 Text sample (first 300 chars):', text.substring(0, 300));
+  
+  if (maxScore > 10) { // Increased threshold for confidence
+    const detectedLang = Object.keys(scores).find(lang => scores[lang] === maxScore);
+    if (detectedLang) {
+      console.log(`✅ Detected language: ${detectedLang} (score: ${maxScore})`);
+      return detectedLang;
+    }
+  }
+  
+  console.log('⚠️ No clear language detected, defaulting to English');
+  return 'English';
 }
 
 function chunkText(text: string, size: number) {
@@ -275,40 +330,46 @@ export async function POST(req: NextRequest) {
       .join("\n");
 
     console.log("📝 Full chat text length:", fullChatText.length);
+    console.log("📝 First 500 chars:", fullChatText.substring(0, 500));
+    console.log("📝 Language detection sample:", fullChatText.substring(0, 200));
 
-    // ✅ Get language from transcripts (users select their language)
-    // For video calls, get language from the transcript metadata
+    // ✅ SMART AUTO-DETECTION: Try multiple methods to find the language
     let detectedLanguage = 'English';
+    
+    // Map language codes to full names
+    const langMap: any = {
+      'uz-UZ': 'Uzbek', 'ru-RU': 'Russian', 'en-US': 'English', 'en-GB': 'English',
+      'kk-KZ': 'Kazakh', 'ky-KG': 'Kyrgyz', 'tg-TJ': 'Tajik',
+      'tk-TM': 'Turkmen', 'az-AZ': 'Azerbaijani', 'tr-TR': 'Turkish',
+      'es-ES': 'Spanish', 'fr-FR': 'French', 'de-DE': 'German',
+      'it-IT': 'Italian', 'pt-BR': 'Portuguese', 'ja-JP': 'Japanese',
+      'ko-KR': 'Korean', 'zh-CN': 'Chinese', 'ar-SA': 'Arabic', 'hi-IN': 'Hindi',
+    };
+    
+    // For video calls, check transcript metadata first
     if (isVideoCall && allMessages.length > 0) {
-      // Get the most common language from transcripts
       const languages = allMessages
         .map((m: any) => m.language)
         .filter((l: string) => l);
       
       if (languages.length > 0) {
-        // Use the first language (or most common one)
         const langCount: any = {};
         languages.forEach((l: string) => {
           langCount[l] = (langCount[l] || 0) + 1;
         });
         const mostCommon = Object.entries(langCount).sort((a: any, b: any) => b[1] - a[1])[0][0];
-        
-        // Map language codes to names
-        const langMap: any = {
-          'uz-UZ': 'Uzbek', 'ru-RU': 'Russian', 'en-US': 'English',
-          'kk-KZ': 'Kazakh', 'ky-KG': 'Kyrgyz', 'tg-TJ': 'Tajik',
-          'tk-TM': 'Turkmen', 'az-AZ': 'Azerbaijani',
-        };
         detectedLanguage = langMap[mostCommon] || 'English';
+        console.log(`✅ Using language from video transcripts: ${detectedLanguage} (${languages.length} transcripts had metadata)`);
       } else {
-        // Fallback to text detection
         detectedLanguage = detectLanguage(fullChatText);
       }
-    } else {
-      // For regular chat, detect from content
+    } 
+    // For regular chat, use smart text detection
+    else {
       detectedLanguage = detectLanguage(fullChatText);
     }
-    console.log(`🌍 Using language: ${detectedLanguage}`);
+    
+    console.log(`🌍 Final language for summary: ${detectedLanguage}`);
 
     // Filter by userId if provided
     let userText = null;

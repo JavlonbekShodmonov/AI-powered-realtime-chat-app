@@ -8,7 +8,20 @@ import { canEnterRoom } from "../utils/roomApi";
 import { useSession } from "next-auth/react";
 import { socketManager } from "../utils/socketClient";
 import { useLocale } from "../components/provider/locale-provider";
-import { Calendar, Clock, Users, Bell, Search, Plus, Check, X, ChevronDown, ChevronUp, Video, AlertCircle } from "lucide-react";
+import {
+  Calendar,
+  Clock,
+  Users,
+  Bell,
+  Search,
+  Plus,
+  Check,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Video,
+  AlertCircle,
+} from "lucide-react";
 
 type UserType = {
   id: string;
@@ -56,7 +69,7 @@ export default function FirstPage() {
       setTimeError(
         locale === "ru"
           ? "⚠️ Нельзя выбрать прошедшее время. Пожалуйста, выберите время в будущем."
-          : "⚠️ Cannot select past time. Please choose a future time."
+          : "⚠️ Cannot select past time. Please choose a future time.",
       );
     } else {
       setTimeError("");
@@ -80,7 +93,9 @@ export default function FirstPage() {
     setIsSearching(true);
 
     try {
-      const res = await fetch(`/api/get-users?search=${encodeURIComponent(query)}`);
+      const res = await fetch(
+        `/api/get-users?search=${encodeURIComponent(query)}`,
+      );
       if (!res.ok) throw new Error("Failed to search users");
 
       const data: UserType[] = await res.json();
@@ -101,11 +116,14 @@ export default function FirstPage() {
   }, []);
 
   const unlockAudio = () => {
-    audioRef.current?.play().then(() => {
-      audioRef.current?.pause();
-      audioRef.current!.currentTime = 0;
-      setAudioUnlocked(true);
-    }).catch(() => {});
+    audioRef.current
+      ?.play()
+      .then(() => {
+        audioRef.current?.pause();
+        audioRef.current!.currentTime = 0;
+        setAudioUnlocked(true);
+      })
+      .catch(() => {});
   };
 
   const handleEnableNotifications = async () => {
@@ -138,13 +156,17 @@ export default function FirstPage() {
         });
       }
 
-      const backendUrl = process.env.NEXT_PUBLIC_API_URL || "https://shadmanov.onrender.com";
-      const response = await fetch(`${backendUrl}/api/subscribe-notifications`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ subscription, userId: user.id }),
-      });
+      const backendUrl =
+        process.env.NEXT_PUBLIC_API_URL || "https://shadmanov.onrender.com";
+      const response = await fetch(
+        `${backendUrl}/api/subscribe-notifications`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ subscription, userId: user.id }),
+        },
+      );
 
       if (!response.ok) throw new Error("Failed to save subscription");
 
@@ -154,13 +176,17 @@ export default function FirstPage() {
       audioRef.current?.play().catch(() => {});
     } catch (error: unknown) {
       console.error("❌ Error enabling notifications:", error);
-      alert(`Failed to enable notifications: ${error instanceof Error ? error.message : "Unknown error"}`);
+      alert(
+        `Failed to enable notifications: ${error instanceof Error ? error.message : "Unknown error"}`,
+      );
     }
   };
 
   function urlBase64ToUint8Array(base64String: string) {
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
-    const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const base64 = (base64String + padding)
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
     const rawData = atob(base64);
     return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
   }
@@ -196,27 +222,29 @@ export default function FirstPage() {
 
     const socket = socketManager.connect(
       user.id,
-      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "https://shadmanov-socket.onrender.com"
+      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL ||
+        "https://shadmanov-socket.onrender.com",
     );
 
     const handleNewAppointment = (appointment: any) => {
       setAppointments((prev) => {
         if (prev.some((a) => a._id === appointment._id)) return prev;
-        
+
         const formatted = {
           _id: appointment._id,
           scheduledAt: appointment.scheduledAt,
-          status: appointment.status || 'pending',
+          status: appointment.status || "pending",
           createdBy: {
             _id: appointment.createdBy,
             name: appointment.createdByName || "Unknown",
           },
-          withUserId: appointment.withUserId?.map((uid: string, i: number) => ({
-            _id: uid,
-            name: appointment.withUserNames?.[i] || "Unknown",
-          })) || [],
+          withUserId:
+            appointment.withUserId?.map((uid: string, i: number) => ({
+              _id: uid,
+              name: appointment.withUserNames?.[i] || "Unknown",
+            })) || [],
         };
-        
+
         return [...prev, formatted];
       });
 
@@ -234,7 +262,7 @@ export default function FirstPage() {
 
     const handleAppointmentUpdated = (updated: any) => {
       setAppointments((prev) =>
-        prev.map((a) => (a._id === updated._id ? { ...a, ...updated } : a))
+        prev.map((a) => (a._id === updated._id ? { ...a, ...updated } : a)),
       );
     };
 
@@ -273,7 +301,7 @@ export default function FirstPage() {
       if (!res.ok) throw new Error("Failed to create appointment");
 
       const newAppointment = await res.json();
-      
+
       setAppointments((prev) => {
         if (prev.some((a) => a._id === newAppointment._id)) return prev;
         return [...prev, newAppointment];
@@ -288,7 +316,10 @@ export default function FirstPage() {
     }
   };
 
-  const handleResponse = async (appointmentId: string, newStatus: "accepted" | "declined") => {
+  const handleResponse = async (
+    appointmentId: string,
+    newStatus: "accepted" | "declined",
+  ) => {
     try {
       const res = await fetch("/api/appointments", {
         method: "PATCH",
@@ -300,7 +331,9 @@ export default function FirstPage() {
       if (!res.ok) throw new Error("Failed to update");
 
       const updated = await res.json();
-      setAppointments((prev) => prev.map((a) => (a._id === updated._id ? updated : a)));
+      setAppointments((prev) =>
+        prev.map((a) => (a._id === updated._id ? updated : a)),
+      );
     } catch (err) {
       console.error("Error:", err);
     }
@@ -312,9 +345,9 @@ export default function FirstPage() {
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-            {locale === 'ru' ? 'Планировщик встреч' : 'Meeting Scheduler'}
+            {locale === "ru" ? "Планировщик встреч" : "Meeting Scheduler"}
           </h1>
-          
+
           {isClient && !notificationsEnabled && (
             <button
               onClick={() => {
@@ -324,7 +357,9 @@ export default function FirstPage() {
               className="flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-4 py-2 rounded-xl hover:shadow-lg transition-all duration-300"
             >
               <Bell className="w-4 h-4" />
-              {locale === 'ru' ? 'Включить уведомления' : 'Enable Notifications'}
+              {locale === "ru"
+                ? "Включить уведомления"
+                : "Enable Notifications"}
             </button>
           )}
         </div>
@@ -335,7 +370,7 @@ export default function FirstPage() {
         <div className="bg-white rounded-2xl shadow-xl border-2 border-indigo-100 p-6 mb-8">
           <h2 className="text-xl font-semibold text-gray-800 mb-6 flex items-center gap-2">
             <Plus className="w-5 h-5 text-indigo-600" />
-            {locale === 'ru' ? 'Создать новую встречу' : 'Create New Meeting'}
+            {locale === "ru" ? "Создать новую встречу" : "Create New Meeting"}
           </h2>
 
           <div className="grid md:grid-cols-2 gap-6">
@@ -346,7 +381,7 @@ export default function FirstPage() {
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 text-white px-6 py-3 rounded-xl hover:shadow-lg transition-all duration-300 mb-4"
               >
                 <Calendar className="w-5 h-5" />
-                {locale === 'ru' ? 'Выбрать время' : 'Select Time'}
+                {locale === "ru" ? "Выбрать время" : "Select Time"}
               </button>
 
               {showCalendar && (
@@ -357,7 +392,8 @@ export default function FirstPage() {
                     showTimeSelect
                     minDate={new Date()}
                     minTime={
-                      startDate && startDate.toDateString() === new Date().toDateString()
+                      startDate &&
+                      startDate.toDateString() === new Date().toDateString()
                         ? new Date()
                         : new Date(new Date().setHours(0, 0, 0, 0))
                     }
@@ -398,7 +434,7 @@ export default function FirstPage() {
                 className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-pink-600 text-white px-6 py-3 rounded-xl hover:shadow-lg transition-all duration-300 mb-4"
               >
                 <Users className="w-5 h-5" />
-                {locale === 'ru' ? 'Выбрать участников' : 'Select Participants'}
+                {locale === "ru" ? "Выбрать участников" : "Select Participants"}
               </button>
 
               {showUsers && (
@@ -407,7 +443,11 @@ export default function FirstPage() {
                     <Search className="absolute left-3 top-3 w-5 h-5 text-gray-400" />
                     <input
                       type="text"
-                      placeholder={locale === 'ru' ? 'Поиск пользователей...' : 'Search users...'}
+                      placeholder={
+                        locale === "ru"
+                          ? "Поиск пользователей..."
+                          : "Search users..."
+                      }
                       value={searchTerm}
                       onChange={(e) => handleSearch(e.target.value)}
                       className="w-full pl-10 pr-4 py-2 border-2 border-gray-200 rounded-lg focus:border-purple-500 focus:outline-none"
@@ -416,7 +456,7 @@ export default function FirstPage() {
 
                   {isSearching && (
                     <div className="text-center py-4 text-gray-500">
-                      {locale === 'ru' ? 'Поиск...' : 'Searching...'}
+                      {locale === "ru" ? "Поиск..." : "Searching..."}
                     </div>
                   )}
 
@@ -429,13 +469,13 @@ export default function FirstPage() {
                             setSelectedUsers((prev) =>
                               prev.some((p) => p.id === u.id)
                                 ? prev.filter((p) => p.id !== u.id)
-                                : [...prev, u]
+                                : [...prev, u],
                             )
                           }
                           className={`w-full flex items-center justify-between p-3 rounded-lg border-2 transition-all ${
                             selectedUsers.some((p) => p.id === u.id)
-                              ? 'bg-purple-100 border-purple-500'
-                              : 'bg-white border-gray-200 hover:border-purple-300'
+                              ? "bg-purple-100 border-purple-500"
+                              : "bg-white border-gray-200 hover:border-purple-300"
                           }`}
                         >
                           <span className="font-medium">{u.name}</span>
@@ -449,7 +489,9 @@ export default function FirstPage() {
 
                   {searchTerm && users.length === 0 && !isSearching && (
                     <p className="text-center text-gray-500 py-4">
-                      {locale === 'ru' ? 'Пользователи не найдены' : 'No users found'}
+                      {locale === "ru"
+                        ? "Пользователи не найдены"
+                        : "No users found"}
                     </p>
                   )}
                 </div>
@@ -459,11 +501,15 @@ export default function FirstPage() {
                 <div className="mt-4 p-4 bg-purple-50 rounded-xl border-2 border-purple-200">
                   <div className="flex items-center gap-2 text-purple-700 font-medium mb-2">
                     <Users className="w-5 h-5" />
-                    {locale === 'ru' ? 'Выбрано участников:' : 'Selected:'} {selectedUsers.length}
+                    {locale === "ru" ? "Выбрано участников:" : "Selected:"}{" "}
+                    {selectedUsers.length}
                   </div>
                   <div className="flex flex-wrap gap-2">
                     {selectedUsers.map((u) => (
-                      <span key={u.id} className="bg-white px-3 py-1 rounded-full text-sm border border-purple-300">
+                      <span
+                        key={u.id}
+                        className="bg-white px-3 py-1 rounded-full text-sm border border-purple-300"
+                      >
                         {u.name}
                       </span>
                     ))}
@@ -478,11 +524,17 @@ export default function FirstPage() {
             onClick={handleStartChatAndCreateAppointment}
             className={`w-full mt-6 py-4 rounded-xl font-semibold text-white transition-all duration-300 ${
               isReady
-                ? 'bg-gradient-to-r from-green-500 to-emerald-600 hover:shadow-lg hover:scale-[1.02]'
-                : 'bg-gray-300 cursor-not-allowed'
+                ? "bg-gradient-to-r from-green-500 to-emerald-600 hover:shadow-lg hover:scale-[1.02]"
+                : "bg-gray-300 cursor-not-allowed"
             }`}
           >
-            {loading ? (locale === 'ru' ? 'Создание...' : 'Creating...') : (locale === 'ru' ? 'Создать встречу' : 'Create Meeting')}
+            {loading
+              ? locale === "ru"
+                ? "Создание..."
+                : "Creating..."
+              : locale === "ru"
+                ? "Создать встречу"
+                : "Create Meeting"}
           </button>
         </div>
 
@@ -494,9 +546,14 @@ export default function FirstPage() {
           >
             <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
               <Video className="w-5 h-5 text-indigo-600" />
-              {locale === 'ru' ? 'Мои встречи' : 'My Appointments'} ({appointments.length})
+              {locale === "ru" ? "Мои встречи" : "My Appointments"} (
+              {appointments.length})
             </h2>
-            {showAppointments ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+            {showAppointments ? (
+              <ChevronUp className="w-5 h-5" />
+            ) : (
+              <ChevronDown className="w-5 h-5" />
+            )}
           </button>
 
           {showAppointments && (
@@ -504,7 +561,11 @@ export default function FirstPage() {
               {appointments.length === 0 ? (
                 <div className="text-center py-12 text-gray-500">
                   <Calendar className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-                  <p>{locale === 'ru' ? 'У вас пока нет встреч' : 'No appointments yet'}</p>
+                  <p>
+                    {locale === "ru"
+                      ? "У вас пока нет встреч"
+                      : "No appointments yet"}
+                  </p>
                 </div>
               ) : (
                 appointments.map((a) => (
@@ -521,44 +582,56 @@ export default function FirstPage() {
                           {new Date(a.scheduledAt).toLocaleTimeString()}
                         </div>
                         <div className="text-sm text-gray-600">
-                          <strong>{locale === 'ru' ? 'Создано:' : 'By:'}</strong> {a.createdBy?.name || 'Unknown'}
+                          <strong>
+                            {locale === "ru" ? "Создано:" : "By:"}
+                          </strong>{" "}
+                          {a.createdBy?.name || "Unknown"}
                         </div>
                       </div>
-                      <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                        a.status === 'accepted' ? 'bg-green-100 text-green-700' :
-                        a.status === 'declined' ? 'bg-red-100 text-red-700' :
-                        'bg-yellow-100 text-yellow-700'
-                      }`}>
+                      <span
+                        className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          a.status === "accepted"
+                            ? "bg-green-100 text-green-700"
+                            : a.status === "declined"
+                              ? "bg-red-100 text-red-700"
+                              : "bg-yellow-100 text-yellow-700"
+                        }`}
+                      >
                         {a.status}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2 text-sm text-gray-600 mb-3">
                       <Users className="w-4 h-4" />
-                      {a.withUserId?.map((u: any) => u.name).join(', ')}
+                      {a.withUserId?.map((u: any) => u.name).join(", ")}
                     </div>
 
-                    {a.status === 'pending' && a.withUserId?.some((u: any) => u._id === user?.id) && (
-                      <div className="flex gap-2">
-                        <button
-                          onClick={() => handleResponse(a._id, 'accepted')}
-                          className="flex-1 bg-green-500 text-white py-2 rounded-lg hover:bg-green-600 transition-colors"
-                        >
-                          <Check className="w-4 h-4 inline mr-1" />
-                          {locale === 'ru' ? 'Принять' : 'Accept'}
-                        </button>
-                        <button
-                          onClick={() => handleResponse(a._id, 'declined')}
-                          className="flex-1 bg-red-500 text-white py-2 rounded-lg hover:bg-red-600 transition-colors"
-                        >
-                          <X className="w-4 h-4 inline mr-1" />
-                          {locale === 'ru' ? 'Отклонить' : 'Decline'}
-                        </button>
-                      </div>
-                    )}
+                    {a.status === "pending" &&
+                      a.withUserId?.some((u: any) => u._id === user?.id) && (
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleResponse(a._id, "accepted")}
+                            className="flex-1 bg-green-500 text-white py-2 rounded-lg hover:bg-green-600 transition-colors"
+                          >
+                            <Check className="w-4 h-4 inline mr-1" />
+                            {locale === "ru" ? "Принять" : "Accept"}
+                          </button>
+                          <button
+                            onClick={() => handleResponse(a._id, "declined")}
+                            className="flex-1 bg-red-500 text-white py-2 rounded-lg hover:bg-red-600 transition-colors"
+                          >
+                            <X className="w-4 h-4 inline mr-1" />
+                            {locale === "ru" ? "Отклонить" : "Decline"}
+                          </button>
+                        </div>
+                      )}
 
-                    {a.status === 'accepted' && (
-                      <EnterRoomButton appointment={a} router={router} locale={locale} />
+                    {a.status === "accepted" && (
+                      <EnterRoomButton
+                        appointment={a}
+                        router={router}
+                        locale={locale}
+                      />
                     )}
                   </div>
                 ))
@@ -567,12 +640,22 @@ export default function FirstPage() {
           )}
         </div>
       </div>
+      <footer className="text-center">
+        <p className="text-sm text-slate-500">
+          {locale === "ru"
+            ? "© 2026 СумМит. Все права защищены."
+            : "© 2026 SumMeet. All rights reserved."}
+        </p>
+      </footer>
     </div>
   );
 }
 
 function EnterRoomButton({ appointment, router, locale }: any) {
-  const [status, setStatus] = React.useState<{ allowed: boolean; reason?: string }>({ allowed: false });
+  const [status, setStatus] = React.useState<{
+    allowed: boolean;
+    reason?: string;
+  }>({ allowed: false });
 
   React.useEffect(() => {
     if (!appointment?._id) return;
@@ -603,15 +686,23 @@ function EnterRoomButton({ appointment, router, locale }: any) {
     <div>
       <button
         disabled={!status.allowed}
-        onClick={() => status.allowed && router.push(`/meeting/${appointment._id}`)}
+        onClick={() =>
+          status.allowed && router.push(`/meeting/${appointment._id}`)
+        }
         className={`w-full py-3 rounded-lg font-semibold transition-all ${
           status.allowed
-            ? 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-lg'
-            : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+            ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:shadow-lg"
+            : "bg-gray-300 text-gray-500 cursor-not-allowed"
         }`}
       >
         <Video className="w-4 h-4 inline mr-2" />
-        {status.allowed ? (locale === 'ru' ? 'Войти в комнату' : 'Enter Room') : (locale === 'ru' ? 'Ожидание...' : 'Waiting...')}
+        {status.allowed
+          ? locale === "ru"
+            ? "Войти в комнату"
+            : "Enter Room"
+          : locale === "ru"
+            ? "Ожидание..."
+            : "Waiting..."}
       </button>
       {!status.allowed && status.reason && (
         <p className="text-xs text-red-500 mt-2 text-center">{status.reason}</p>

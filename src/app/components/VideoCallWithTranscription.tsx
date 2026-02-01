@@ -185,11 +185,11 @@ export default function VideoCallWithTranscription({
     recognition.lang = selectedLanguage;
     recognition.maxAlternatives = 1;
 
-    let finalTranscript = '';
-    let interimTranscript = '';
+    let finalTranscript = "";
+    let interimTranscript = "";
 
     recognition.onresult = async (event: any) => {
-      if (isProcessingRef.current) return; // ✅ Prevent duplicate processing
+      if (isProcessingRef.current) return;
 
       try {
         interimTranscript = "";
@@ -205,20 +205,40 @@ export default function VideoCallWithTranscription({
           }
         }
 
-        // ✅ Update status with interim results
         if (interimTranscript) {
           setSpeechStatus(
             `Hearing: "${interimTranscript.substring(0, 30)}..."`,
           );
         }
 
-        // ✅ Save only when we have final results
         if (finalTranscript.trim().length > 0) {
           const cleanText = finalTranscript.trim();
 
-          // ✅ Validate transcript
-          if (cleanText.length < 2) {
+          // ✅ ADD VALIDATION: Filter out pure numbers and too-short text
+          if (cleanText.length < 3) {
             console.warn("⚠️ Transcript too short, skipping:", cleanText);
+            finalTranscript = "";
+            return;
+          }
+
+          // ✅ ADD: Filter out pure numbers (likely noise)
+          if (/^\d+$/.test(cleanText)) {
+            console.warn(
+              "⚠️ Pure numbers detected (likely noise), skipping:",
+              cleanText,
+            );
+            finalTranscript = "";
+            return;
+          }
+
+          // ✅ ADD: Filter out strings with >80% numbers
+          const numberRatio =
+            (cleanText.match(/\d/g) || []).length / cleanText.length;
+          if (numberRatio > 0.8) {
+            console.warn(
+              "⚠️ Too many numbers (likely noise), skipping:",
+              cleanText,
+            );
             finalTranscript = "";
             return;
           }
@@ -231,7 +251,7 @@ export default function VideoCallWithTranscription({
           await saveTranscript(cleanText);
 
           setSpeechStatus("Listening...");
-          finalTranscript = ""; // Reset for next phrase
+          finalTranscript = "";
           isProcessingRef.current = false;
         }
       } catch (error) {
@@ -239,7 +259,6 @@ export default function VideoCallWithTranscription({
         isProcessingRef.current = false;
       }
     };
-
     recognition.onerror = (event: any) => {
       console.error("❌ Speech recognition error:", event.error);
       isProcessingRef.current = false;
