@@ -14,6 +14,7 @@ import {
   MicOff,
   Copy,
   Users,
+  AlertCircle,
 } from "lucide-react";
 
 interface Transcript {
@@ -162,6 +163,8 @@ export default function VideoCallWithTranscription({
           "Please use Android Chrome or desktop browser for AI transcription. " +
           "You can still see transcripts from other participants!",
       );
+      setIsRecording(false);
+      setSpeechStatus("Inactive");
       return;
     }
 
@@ -176,6 +179,8 @@ export default function VideoCallWithTranscription({
           "Please use Chrome, Edge, or Safari on desktop. " +
           "You can still view transcripts from other participants!",
       );
+      setIsRecording(false);
+      setSpeechStatus("Inactive");
       return;
     }
 
@@ -187,6 +192,12 @@ export default function VideoCallWithTranscription({
 
     let finalTranscript = "";
     let interimTranscript = "";
+
+    // ✅ ADD: onstart event handler to update status immediately
+    recognition.onstart = () => {
+      console.log("🎤 Speech recognition started");
+      setSpeechStatus("Listening...");
+    };
 
     recognition.onresult = async (event: any) => {
       if (isProcessingRef.current) return;
@@ -338,10 +349,13 @@ export default function VideoCallWithTranscription({
     }
   };
 
+  // ✅ FIXED: Update status immediately when button is clicked
   const toggleRecording = () => {
     if (isRecording) {
       stopSpeechRecognition();
     } else {
+      setIsRecording(true);
+      setSpeechStatus("Starting...");
       startSpeechRecognition();
     }
   };
@@ -460,8 +474,8 @@ export default function VideoCallWithTranscription({
   };
 
   const getStatusColor = () => {
-    if (speechStatus.includes("Listening")) return "text-green-400";
-    if (speechStatus.includes("Processing")) return "text-blue-400";
+    if (speechStatus.includes("Listening") || speechStatus.includes("Starting") || speechStatus.includes("Hearing")) return "text-green-400";
+    if (speechStatus.includes("Processing") || speechStatus.includes("Saving")) return "text-blue-400";
     if (speechStatus.includes("Error")) return "text-red-400";
     return "text-gray-400";
   };
@@ -505,7 +519,11 @@ export default function VideoCallWithTranscription({
                 // If recording, restart with new language
                 if (isRecording) {
                   stopSpeechRecognition();
-                  setTimeout(() => startSpeechRecognition(), 100);
+                  setTimeout(() => {
+                    setIsRecording(true);
+                    setSpeechStatus("Starting...");
+                    startSpeechRecognition();
+                  }, 100);
                 }
               }}
               className="bg-transparent text-white text-sm border-none focus:outline-none cursor-pointer pr-6"
