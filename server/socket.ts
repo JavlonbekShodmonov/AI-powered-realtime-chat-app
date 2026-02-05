@@ -318,9 +318,9 @@ io.on("connection", (socket: Socket) => {
       timestamp
     });
     
-    // Save call start message to database (optional)
+    // Save call start message to database
     try {
-      const Message = require('./models/Message'); // Adjust path to your model
+      const Message = require('./models/Message');
       await Message.create({
         roomId,
         senderId: 'system',
@@ -352,9 +352,9 @@ io.on("connection", (socket: Socket) => {
       timestamp
     });
     
-    // Save call end message to database (optional)
+    // Save call end message to database
     try {
-      const Message = require('./models/Message'); // Adjust path to your model
+      const Message = require('./models/Message'); 
       await Message.create({
         roomId,
         senderId: 'system',

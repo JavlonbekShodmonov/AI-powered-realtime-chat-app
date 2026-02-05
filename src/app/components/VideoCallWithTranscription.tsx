@@ -53,6 +53,7 @@ export default function VideoCallWithTranscription({
   const recognitionRef = useRef<any>(null);
   const [selectedLanguage, setSelectedLanguage] = useState("uz-UZ");
   const isProcessingRef = useRef(false);
+  const restartTimeoutRef = useRef<any>(null);
 
   const LANGUAGES = [
     { code: "en-US", name: "English (US)", flag: "🇺🇸" },
@@ -109,6 +110,7 @@ export default function VideoCallWithTranscription({
       !!(window as any).webkitSpeechRecognition
     );
   };
+  
   // Clean room name and create video URLs
   const cleanRoom = roomName.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
 
@@ -157,11 +159,17 @@ export default function VideoCallWithTranscription({
 
   // Initialize Web Speech API
   const startSpeechRecognition = () => {
-    if (isMobile() && !isSpeechRecognitionSupported()) {
+    // ✅ IMPROVED: Better iOS/Safari detection
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    
+    if (isIOS || (isSafari && isMobile())) {
       alert(
-        "Speech recognition is not supported on iOS/Safari. " +
-          "Please use Android Chrome or desktop browser for AI transcription. " +
-          "You can still see transcripts from other participants!",
+        "⚠️ Speech recognition is not supported on iOS/Safari.\n\n" +
+          "Please use:\n" +
+          "• Android Chrome browser, or\n" +
+          "• Desktop Chrome/Edge\n\n" +
+          "You can still see transcripts from other participants!"
       );
       setIsRecording(false);
       setSpeechStatus("Inactive");
@@ -175,32 +183,51 @@ export default function VideoCallWithTranscription({
 
     if (!SpeechRecognition) {
       alert(
-        "Speech recognition is not supported in your browser. " +
-          "Please use Chrome, Edge, or Safari on desktop. " +
-          "You can still view transcripts from other participants!",
+        "⚠️ Speech recognition is not supported in your browser.\n\n" +
+          "Please use Chrome or Edge browser.\n\n" +
+          "You can still view transcripts from other participants!"
       );
       setIsRecording(false);
       setSpeechStatus("Inactive");
       return;
     }
 
+    console.log("🎤 Initializing speech recognition...");
+    console.log("📱 Device info:", {
+      isMobile: isMobile(),
+      isIOS: isIOS,
+      isSafari: isSafari,
+      userAgent: navigator.userAgent,
+      language: selectedLanguage
+    });
+
     const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
+    
+    // ✅ MOBILE-OPTIMIZED SETTINGS
+    recognition.continuous = true; // Keep listening
+    recognition.interimResults = true; // Show interim results
     recognition.lang = selectedLanguage;
     recognition.maxAlternatives = 1;
-
+    
     let finalTranscript = "";
     let interimTranscript = "";
+    let lastResultTime = Date.now();
 
-    // ✅ ADD: onstart event handler to update status immediately
+    // ✅ ADD: onstart event handler
     recognition.onstart = () => {
-      console.log("🎤 Speech recognition started");
+      console.log("✅ Speech recognition started successfully");
       setSpeechStatus("Listening...");
+      lastResultTime = Date.now();
     };
 
     recognition.onresult = async (event: any) => {
-      if (isProcessingRef.current) return;
+      console.log("🎯 Speech result received");
+      lastResultTime = Date.now();
+      
+      if (isProcessingRef.current) {
+        console.log("⏳ Still processing previous result, skipping...");
+        return;
+      }
 
       try {
         interimTranscript = "";
@@ -211,6 +238,7 @@ export default function VideoCallWithTranscription({
 
           if (result.isFinal) {
             finalTranscript += transcript + " ";
+            console.log("✅ Final transcript part:", transcript);
           } else {
             interimTranscript += transcript;
           }
@@ -225,36 +253,27 @@ export default function VideoCallWithTranscription({
         if (finalTranscript.trim().length > 0) {
           const cleanText = finalTranscript.trim();
 
-          // ✅ ADD VALIDATION: Filter out pure numbers and too-short text
+          // ✅ VALIDATION: Filter out noise
           if (cleanText.length < 3) {
             console.warn("⚠️ Transcript too short, skipping:", cleanText);
             finalTranscript = "";
             return;
           }
 
-          // ✅ ADD: Filter out pure numbers (likely noise)
           if (/^\d+$/.test(cleanText)) {
-            console.warn(
-              "⚠️ Pure numbers detected (likely noise), skipping:",
-              cleanText,
-            );
+            console.warn("⚠️ Pure numbers detected (noise), skipping:", cleanText);
             finalTranscript = "";
             return;
           }
 
-          // ✅ ADD: Filter out strings with >80% numbers
-          const numberRatio =
-            (cleanText.match(/\d/g) || []).length / cleanText.length;
+          const numberRatio = (cleanText.match(/\d/g) || []).length / cleanText.length;
           if (numberRatio > 0.8) {
-            console.warn(
-              "⚠️ Too many numbers (likely noise), skipping:",
-              cleanText,
-            );
+            console.warn("⚠️ Too many numbers (noise), skipping:", cleanText);
             finalTranscript = "";
             return;
           }
 
-          console.log("✅ Final transcript captured:", cleanText);
+          console.log("💾 Saving final transcript:", cleanText);
 
           isProcessingRef.current = true;
           setSpeechStatus("Saving...");
@@ -268,43 +287,53 @@ export default function VideoCallWithTranscription({
       } catch (error) {
         console.error("❌ Error processing speech result:", error);
         isProcessingRef.current = false;
+        setSpeechStatus("Listening...");
       }
     };
+
     recognition.onerror = (event: any) => {
       console.error("❌ Speech recognition error:", event.error);
       isProcessingRef.current = false;
 
       switch (event.error) {
         case "no-speech":
+          console.log("⚠️ No speech detected, continuing...");
           setSpeechStatus("No speech detected");
           setTimeout(() => {
             if (isRecording) setSpeechStatus("Listening...");
           }, 2000);
           break;
+          
         case "audio-capture":
           setSpeechStatus("Microphone error");
-          alert("Cannot access microphone. Please check permissions.");
+          alert("❌ Cannot access microphone.\n\nPlease:\n1. Check microphone permissions\n2. Make sure no other app is using the mic\n3. Try closing and reopening the browser");
           setIsRecording(false);
           break;
+          
         case "not-allowed":
           setSpeechStatus("Permission denied");
-          alert(
-            "Microphone permission denied. Please allow microphone access.",
-          );
+          alert("❌ Microphone permission denied.\n\nPlease:\n1. Click the microphone icon in your browser's address bar\n2. Allow microphone access\n3. Refresh the page");
           setIsRecording(false);
           break;
+          
         case "network":
           setSpeechStatus("Network error");
-          alert("Network error. Please check your internet connection.");
+          console.warn("⚠️ Network error, will retry...");
+          // Don't stop recording, let it retry
           break;
+          
         case "language-not-supported":
           setSpeechStatus("Language not supported");
-          alert(
-            `Language ${selectedLanguage} is not supported by your browser. Try English or Russian.`,
-          );
+          alert(`❌ Language "${selectedLanguage}" is not supported by your browser.\n\nPlease try:\n• English (en-US)\n• Russian (ru-RU)\n• Or check your browser's supported languages`);
           setIsRecording(false);
           break;
+          
+        case "aborted":
+          console.log("⚠️ Recognition aborted, will restart if still recording...");
+          break;
+          
         default:
+          console.error("⚠️ Unknown error:", event.error);
           setSpeechStatus(`Error: ${event.error}`);
       }
     };
@@ -314,14 +343,32 @@ export default function VideoCallWithTranscription({
       isProcessingRef.current = false;
 
       if (isRecording) {
-        console.log("🔄 Restarting recognition...");
-        try {
-          recognition.start();
-        } catch (error) {
-          console.error("❌ Failed to restart recognition:", error);
-          setIsRecording(false);
-          setSpeechStatus("Inactive");
+        console.log("🔄 Auto-restarting recognition for continuous listening...");
+        
+        // ✅ MOBILE FIX: Add small delay before restart to prevent errors
+        if (restartTimeoutRef.current) {
+          clearTimeout(restartTimeoutRef.current);
         }
+        
+        restartTimeoutRef.current = setTimeout(() => {
+          if (isRecording && recognitionRef.current) {
+            try {
+              recognitionRef.current.start();
+              console.log("✅ Recognition restarted successfully");
+            } catch (error: any) {
+              console.error("❌ Failed to restart recognition:", error);
+              
+              // If already started, that's okay
+              if (error.message && error.message.includes("already started")) {
+                console.log("ℹ️ Recognition already running");
+              } else {
+                setIsRecording(false);
+                setSpeechStatus("Inactive");
+                alert("❌ Speech recognition stopped unexpectedly. Please click the mic button again.");
+              }
+            }
+          }
+        }, 300); // 300ms delay helps on mobile
       } else {
         setSpeechStatus("Inactive");
       }
@@ -331,37 +378,64 @@ export default function VideoCallWithTranscription({
 
     try {
       recognition.start();
-    } catch (error) {
+      console.log("🎤 Recognition.start() called");
+    } catch (error: any) {
       console.error("❌ Failed to start recognition:", error);
-      alert("Failed to start speech recognition. Please try again.");
-      setIsRecording(false);
-      setSpeechStatus("Error");
+      
+      if (error.message && error.message.includes("already started")) {
+        console.log("ℹ️ Recognition already running, that's okay");
+        setSpeechStatus("Listening...");
+      } else {
+        alert("❌ Failed to start speech recognition.\n\nPlease:\n1. Check microphone permissions\n2. Refresh the page\n3. Try again");
+        setIsRecording(false);
+        setSpeechStatus("Error");
+      }
     }
   };
 
   const stopSpeechRecognition = () => {
+    console.log("🛑 Stopping speech recognition...");
+    
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
+    }
+    
     if (recognitionRef.current) {
-      setIsRecording(false);
-      isProcessingRef.current = false;
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-      setSpeechStatus("Inactive");
+      try {
+        setIsRecording(false);
+        isProcessingRef.current = false;
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+        setSpeechStatus("Inactive");
+        console.log("✅ Speech recognition stopped");
+      } catch (error) {
+        console.error("❌ Error stopping recognition:", error);
+        setSpeechStatus("Inactive");
+      }
     }
   };
 
   // ✅ FIXED: Update status immediately when button is clicked
   const toggleRecording = () => {
     if (isRecording) {
+      console.log("👤 User stopped recording");
       stopSpeechRecognition();
     } else {
+      console.log("👤 User started recording");
       setIsRecording(true);
       setSpeechStatus("Starting...");
-      startSpeechRecognition();
+      
+      // ✅ MOBILE FIX: Small delay helps on some Android devices
+      setTimeout(() => {
+        startSpeechRecognition();
+      }, 100);
     }
   };
 
   useEffect(() => {
     return () => {
+      console.log("🧹 Component unmounting, cleaning up...");
       stopSpeechRecognition();
     };
   }, []);
@@ -391,7 +465,7 @@ export default function VideoCallWithTranscription({
           userName: displayName,
           text: cleanText,
           timestamp: Date.now(),
-          language: selectedLanguage, // ✅ Save language with transcript
+          language: selectedLanguage,
         }),
       });
 
@@ -522,8 +596,8 @@ export default function VideoCallWithTranscription({
                   setTimeout(() => {
                     setIsRecording(true);
                     setSpeechStatus("Starting...");
-                    startSpeechRecognition();
-                  }, 100);
+                    setTimeout(() => startSpeechRecognition(), 100);
+                  }, 200);
                 }
               }}
               className="bg-transparent text-white text-sm border-none focus:outline-none cursor-pointer pr-6"
@@ -557,7 +631,7 @@ export default function VideoCallWithTranscription({
               {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
             </button>
             <span
-              className={`text-xs font-semibold ${getStatusColor()} bg-gray-900/80 px-2 py-1 rounded`}
+              className={`text-xs font-semibold ${getStatusColor()} bg-gray-900/80 px-2 py-1 rounded whitespace-nowrap`}
             >
               {speechStatus}
             </span>
@@ -630,6 +704,19 @@ export default function VideoCallWithTranscription({
                     <li>Saves transcript in real-time</li>
                     <li>Generate AI summary anytime</li>
                   </ul>
+                  
+                  {/* Device compatibility info */}
+                  <div className="mt-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded border border-yellow-200 dark:border-yellow-700">
+                    <p className="text-xs font-semibold text-yellow-800 dark:text-yellow-300">
+                      📱 Device Support:
+                    </p>
+                    <ul className="text-xs mt-1 space-y-1 text-yellow-700 dark:text-yellow-400">
+                      <li>✅ Android Chrome</li>
+                      <li>✅ Desktop Chrome/Edge</li>
+                      <li>❌ iOS/Safari (not supported)</li>
+                    </ul>
+                  </div>
+                  
                   <button
                     onClick={async () => {
                       console.log("🧪 Testing transcript save...");
@@ -671,7 +758,7 @@ export default function VideoCallWithTranscription({
         </div>
       )}
 
-      {/* Summary Modal */}
+      {/* Summary Modal - Same as before */}
       {showSummary && (
         <>
           <div
