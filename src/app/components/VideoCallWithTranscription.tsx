@@ -581,6 +581,24 @@ export default function VideoCallWithTranscription({
           onLoad={() => setIsLoading(false)}
         />
 
+        {/* Mobile Warning Banner */}
+        {isMobile() && (
+          <div className="absolute top-4 left-4 right-4 md:left-auto md:right-20 max-w-md z-50">
+            <div className="bg-yellow-500 text-black px-4 py-3 rounded-lg shadow-2xl border-2 border-yellow-600 animate-pulse">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="w-6 h-6 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-bold text-sm mb-1">⚠️ Mobile Device Detected</p>
+                  <p className="text-xs leading-relaxed">
+                    AI transcription may not work on mobile phones (especially iOS/Safari). 
+                    <strong> For best results, use desktop Chrome or Edge.</strong> You can still view transcripts from desktop users.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Control Buttons */}
         <div className="absolute top-4 right-4 flex gap-2 flex-wrap max-w-md">
           {/* Language Selector */}
