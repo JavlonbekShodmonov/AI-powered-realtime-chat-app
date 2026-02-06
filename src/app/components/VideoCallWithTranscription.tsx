@@ -54,6 +54,7 @@ export default function VideoCallWithTranscription({
   const [selectedLanguage, setSelectedLanguage] = useState("uz-UZ");
   const isProcessingRef = useRef(false);
   const restartTimeoutRef = useRef<any>(null);
+  const [showMobileWarning, setShowMobileWarning] = useState(true);
 
   const LANGUAGES = [
     { code: "en-US", name: "English (US)", flag: "🇺🇸" },
@@ -581,19 +582,25 @@ export default function VideoCallWithTranscription({
           onLoad={() => setIsLoading(false)}
         />
 
-        {/* Mobile Warning Banner */}
-        {isMobile() && (
+        {/* Mobile Warning Banner - Dismissible */}
+        {isMobile() && showMobileWarning && (
           <div className="absolute top-4 left-4 right-4 md:left-auto md:right-20 max-w-md z-50">
-            <div className="bg-yellow-500 text-black px-4 py-3 rounded-lg shadow-2xl border-2 border-yellow-600 animate-pulse">
+            <div className="bg-yellow-400 text-gray-900 px-4 py-3 rounded-lg shadow-xl border-2 border-yellow-500">
               <div className="flex items-start gap-3">
-                <AlertCircle className="w-6 h-6 flex-shrink-0 mt-0.5" />
+                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-yellow-800" />
                 <div className="flex-1">
-                  <p className="font-bold text-sm mb-1">⚠️ Mobile Device Detected</p>
+                  <p className="font-bold text-sm mb-1">📱 Mobile Device</p>
                   <p className="text-xs leading-relaxed">
-                    AI transcription may not work on mobile phones (especially iOS/Safari). 
-                    <strong> For best results, use desktop Chrome or Edge.</strong> You can still view transcripts from desktop users.
+                    AI transcription works best on desktop Chrome/Edge. On mobile, you can still view others' transcripts!
                   </p>
                 </div>
+                <button
+                  onClick={() => setShowMobileWarning(false)}
+                  className="flex-shrink-0 text-gray-700 hover:text-gray-900 transition-colors"
+                  title="Dismiss warning"
+                >
+                  <X size={20} />
+                </button>
               </div>
             </div>
           </div>
