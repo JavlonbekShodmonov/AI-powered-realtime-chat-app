@@ -1,4 +1,6 @@
 // app/api/suggest-response/route.ts
+// OPTIMIZED VERSION WITH QUOTA MANAGEMENT
+
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenAI } from "@google/genai";
 import clientPromise from "@/lib/mongodb";
@@ -6,16 +8,20 @@ import { ObjectId } from "mongodb";
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_KEY });
 
-// ✅ Rate limiting with in-memory cache
+// ✅ Enhanced caching with longer duration
 const requestCache = new Map<string, { timestamp: number; suggestions: string[] }>();
-const CACHE_DURATION = 30000; // 30 seconds cache per user+room
-const MAX_RETRIES = 2;
-const RETRY_DELAY = 1000; // 1 second
+const CACHE_DURATION = 2 * 60 * 1000; // 2 minutes cache (increased from 30s)
+const MAX_RETRIES = 1; // Reduced from 2 to save quota
+const RETRY_DELAY = 2000; // Increased to 2 seconds
 
-// ✅ Request queue to prevent overwhelming the API
+// ✅ More conservative rate limiting
 let activeRequests = 0;
-const MAX_CONCURRENT_REQUESTS = 5;
+const MAX_CONCURRENT_REQUESTS = 3; // Reduced from 5
 const requestQueue: Array<() => void> = [];
+
+// ✅ Global quota tracking
+let quotaExhausted = false;
+let quotaResetTime = 0;
 
 async function waitForSlot(): Promise<void> {
   if (activeRequests < MAX_CONCURRENT_REQUESTS) {
@@ -39,10 +45,9 @@ function releaseSlot() {
   }
 }
 
-// ✅ Utility to add delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-// ✅ Fallback suggestions generator
+// ✅ Enhanced fallback suggestions
 function generateFallbackSuggestions(
   recentMessages: any[],
   userId: string,
@@ -55,6 +60,7 @@ function generateFallbackSuggestions(
       "Hi everyone! Thanks for having me here.",
       "Hello! I'm looking forward to our discussion.",
       "Hi! What should we start with?",
+      "Nice to meet you all!",
     ];
   }
 
@@ -68,6 +74,18 @@ function generateFallbackSuggestions(
       "Good point! Here's what I think...",
       "I'd be happy to clarify that.",
       "Let me address that step by step.",
+      "Thanks for asking - here's my perspective.",
+    ];
+  }
+
+  // Check for agreement/disagreement patterns
+  const lastContent = lastMessage.content.toLowerCase();
+  if (lastContent.includes("agree") || lastContent.includes("think")) {
+    return [
+      "I share that perspective.",
+      "That's an interesting viewpoint.",
+      "I see what you mean. What's next?",
+      "Could you elaborate on that?",
     ];
   }
 
@@ -76,35 +94,30 @@ function generateFallbackSuggestions(
     "Could you elaborate on that point?",
     "That makes sense. What's the next step?",
     "I see what you mean. How should we proceed?",
+    "Thanks for sharing that insight.",
   ];
 }
 
-// ✅ Main AI suggestion function with retry logic
+// ✅ Simplified AI prompt to use fewer tokens
 async function getAISuggestions(
   conversation: string,
   userName: string,
   userMessageCount: number,
   retryCount = 0
 ): Promise<string[]> {
-  const prompt = `You are an AI assistant helping someone respond in a professional meeting chat. 
+  // ✅ Check quota first
+  if (quotaExhausted && Date.now() < quotaResetTime) {
+    throw new Error("QUOTA_EXHAUSTED");
+  }
 
-Conversation context:
+  // ✅ Shorter, more efficient prompt
+  const prompt = `Recent chat:
 ${conversation}
 
-User's name: ${userName || "User"}
-User has sent ${userMessageCount} message(s) so far.
+User: ${userName || "User"} (${userMessageCount} messages sent)
 
-Based on this conversation, suggest 3-5 helpful, contextually appropriate responses that ${userName || "the user"} could send next. Consider:
-- The flow and topic of the conversation
-- What questions were asked that need answering
-- Opportunities to contribute value or ask clarifying questions
-- Professional tone appropriate for a business meeting
-- Brief, clear responses (1-2 sentences each)
-
-Format your response as a JSON array of strings, like this:
-["suggestion 1", "suggestion 2", "suggestion 3"]
-
-Only return the JSON array, nothing else.`;
+Suggest 4 brief, helpful responses (1-2 sentences each).
+Return ONLY a JSON array: ["response 1", "response 2", "response 3", "response 4"]`;
 
   try {
     const result = await ai.models.generateContent({
@@ -113,8 +126,6 @@ Only return the JSON array, nothing else.`;
     });
 
     let responseText = result.candidates?.[0]?.content?.parts?.[0]?.text || "[]";
-    
-    // Clean up the response
     responseText = responseText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
 
     const suggestions = JSON.parse(responseText);
@@ -123,19 +134,28 @@ Only return the JSON array, nothing else.`;
       throw new Error("Invalid response format");
     }
 
+    // ✅ Reset quota flag on success
+    if (quotaExhausted) {
+      console.log("✅ Quota restored!");
+      quotaExhausted = false;
+    }
+
     return suggestions.slice(0, 5);
   } catch (error: any) {
     console.error(`❌ AI suggestion error (attempt ${retryCount + 1}):`, error.message);
 
-    // ✅ Handle quota errors - don't retry
-    if (error.message?.includes("quota") || error.message?.includes("RESOURCE_EXHAUSTED")) {
-      throw new Error("QUOTA_EXCEEDED");
+    // ✅ Handle quota errors
+    if (error.message?.includes("quota") || error.message?.includes("RESOURCE_EXHAUSTED") || error.status === 429) {
+      console.error("🚨 QUOTA EXHAUSTED - Setting 1 hour cooldown");
+      quotaExhausted = true;
+      quotaResetTime = Date.now() + (60 * 60 * 1000); // 1 hour
+      throw new Error("QUOTA_EXHAUSTED");
     }
 
-    // ✅ Retry on other errors
+    // ✅ Retry only once
     if (retryCount < MAX_RETRIES) {
       console.log(`⏳ Retrying in ${RETRY_DELAY}ms...`);
-      await delay(RETRY_DELAY * (retryCount + 1)); // Exponential backoff
+      await delay(RETRY_DELAY * (retryCount + 1));
       return getAISuggestions(conversation, userName, userMessageCount, retryCount + 1);
     }
 
@@ -156,7 +176,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // ✅ Check cache first
+    // ✅ Check cache first (before quota check)
     const cacheKey = `${userId}-${roomId}`;
     const cached = requestCache.get(cacheKey);
     
@@ -168,7 +188,70 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // ✅ Wait for available slot in queue
+    // ✅ Check if quota is exhausted
+    if (quotaExhausted && Date.now() < quotaResetTime) {
+      const client = await clientPromise;
+      const db = client.db();
+      const messagesCollection = db.collection("messages");
+      const usersCollection = db.collection("users");
+
+      let recentMessages = await messagesCollection
+        .find({ roomId })
+        .sort({ createdAt: -1 })
+        .limit(lastMessagesCount)
+        .toArray();
+
+      if (recentMessages.length === 0 && ObjectId.isValid(roomId)) {
+        recentMessages = await messagesCollection
+          .find({ roomId: new ObjectId(roomId) })
+          .sort({ createdAt: -1 })
+          .limit(lastMessagesCount)
+          .toArray();
+      }
+
+      recentMessages = recentMessages.reverse();
+
+      const senderIds = [...new Set(recentMessages.map((m: any) => m.senderId))];
+      const validObjectIds: ObjectId[] = [];
+      
+      senderIds.forEach((id: any) => {
+        if (typeof id === 'string' && ObjectId.isValid(id)) {
+          try {
+            validObjectIds.push(new ObjectId(id));
+          } catch (e) {}
+        } else if (id instanceof ObjectId) {
+          validObjectIds.push(id);
+        }
+      });
+
+      const users = validObjectIds.length > 0 
+        ? await usersCollection
+            .find({ _id: { $in: validObjectIds } })
+            .project({ _id: 1, name: 1 })
+            .toArray()
+        : [];
+
+      const userMap = new Map<string, string>();
+      users.forEach((u: any) => {
+        userMap.set(u._id.toString(), u.name || "Guest");
+      });
+
+      const fallbackSuggestions = generateFallbackSuggestions(
+        recentMessages,
+        userId,
+        userMap
+      );
+
+      const minutesLeft = Math.ceil((quotaResetTime - Date.now()) / 60000);
+      
+      return NextResponse.json({
+        suggestions: fallbackSuggestions,
+        warning: `AI quota exhausted. Resets in ${minutesLeft} min. Using contextual suggestions.`,
+        quotaExhausted: true,
+      });
+    }
+
+    // ✅ Wait for slot
     await waitForSlot();
     slotAcquired = true;
 
@@ -177,7 +260,6 @@ export async function POST(req: NextRequest) {
     const messagesCollection = db.collection("messages");
     const usersCollection = db.collection("users");
 
-    // ✅ Fetch recent messages with timeout
     const fetchMessagesPromise = messagesCollection
       .find({ roomId })
       .sort({ createdAt: -1 })
@@ -203,9 +285,9 @@ export async function POST(req: NextRequest) {
         "Hi! Nice to meet you.",
         "Hello, how can I help you today?",
         "Hey! Looking forward to our discussion.",
+        "Nice to connect with you!",
       ];
       
-      // Cache the result
       requestCache.set(cacheKey, {
         timestamp: Date.now(),
         suggestions: initialSuggestions,
@@ -214,15 +296,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ suggestions: initialSuggestions });
     }
 
-    // Reverse to get chronological order
     recentMessages = recentMessages.reverse();
 
-    // ✅ FIX: Safe conversion of senderIds to ObjectId
     const senderIds = [...new Set(recentMessages.map((m: any) => m.senderId))];
-    
-    // Convert to ObjectId only if valid, otherwise keep as string
     const validObjectIds: ObjectId[] = [];
-    const stringIds: string[] = [];
+    const stringIds: string[] = [];   
     
     senderIds.forEach((id: any) => {
       if (typeof id === 'string' && ObjectId.isValid(id)) {
@@ -230,19 +308,16 @@ export async function POST(req: NextRequest) {
           validObjectIds.push(new ObjectId(id));
           stringIds.push(id);
         } catch (e) {
-          // If conversion fails, treat as string
           stringIds.push(id);
         }
       } else if (id instanceof ObjectId) {
-        validObjectIds.push(id);
+        validObjectIds.push(id); 
         stringIds.push(id.toString());
       } else {
-        // Keep as is if not string or ObjectId
         stringIds.push(String(id));
       }
     });
 
-    // ✅ Query users with ObjectIds
     const users = validObjectIds.length > 0 
       ? await usersCollection
           .find({ _id: { $in: validObjectIds } })
@@ -250,15 +325,16 @@ export async function POST(req: NextRequest) {
           .toArray()
       : [];
 
-    // ✅ Create userMap with both ObjectId and string representations
     const userMap = new Map<string, string>();
     users.forEach((u: any) => {
       const idStr = u._id.toString();
       userMap.set(idStr, u.name || "Guest");
     });
 
-    // Format conversation
-    const conversation = recentMessages
+    // ✅ Limit conversation length to save tokens
+    const limitedMessages = recentMessages.slice(-8); // Only last 8 messages
+    
+    const conversation = limitedMessages
       .map((m: any) => {
         const senderId = m.senderId instanceof ObjectId ? m.senderId.toString() : String(m.senderId);
         const senderName = userMap.get(senderId) || "Guest";
@@ -275,52 +351,50 @@ export async function POST(req: NextRequest) {
     ).length;
 
     try {
-      // ✅ Get AI suggestions with retry logic
       const suggestions = await getAISuggestions(
         conversation,
         userName,
         userMessageCount
       );
 
-      // ✅ Cache the successful result
+      // ✅ Cache with longer duration
       requestCache.set(cacheKey, {
         timestamp: Date.now(),
         suggestions,
       });
 
-      // ✅ Clean up old cache entries (keep last 100)
-      if (requestCache.size > 100) {
-        const oldestKey = requestCache.keys().next().value;
-        if (oldestKey) {
-          requestCache.delete(oldestKey);
-        }
+      // ✅ More aggressive cache cleanup
+      if (requestCache.size > 50) { // Reduced from 100
+        const entries = Array.from(requestCache.entries());
+        const toDelete = entries
+          .sort((a, b) => a[1].timestamp - b[1].timestamp)
+          .slice(0, 10); // Delete oldest 10
+        
+        toDelete.forEach(([key]) => requestCache.delete(key));
       }
 
       return NextResponse.json({ suggestions });
     } catch (error: any) {
       console.error("❌ AI suggestion error:", error);
 
-      // ✅ Generate contextual fallback suggestions
       const fallbackSuggestions = generateFallbackSuggestions(
         recentMessages,
         userId,
         userMap
       );
 
-      // ✅ Cache fallback too (shorter duration)
+      // ✅ Cache fallback
       requestCache.set(cacheKey, {
-        timestamp: Date.now() - (CACHE_DURATION - 10000), // Only cache for 10s
+        timestamp: Date.now() - (CACHE_DURATION - 30000), // Cache for 30s only
         suggestions: fallbackSuggestions,
       });
 
-      if (error.message === "QUOTA_EXCEEDED") {
-        return NextResponse.json(
-          {
-            suggestions: fallbackSuggestions,
-            error: "API quota exceeded. Using contextual suggestions.",
-          },
-          { status: 200 }
-        );
+      if (error.message === "QUOTA_EXHAUSTED") {
+        return NextResponse.json({
+          suggestions: fallbackSuggestions,
+          warning: "API quota exceeded. Using contextual suggestions.",
+          quotaExhausted: true,
+        });
       }
 
       return NextResponse.json({
@@ -330,7 +404,6 @@ export async function POST(req: NextRequest) {
     }
   } catch (err: any) {
     console.error("❌ API error:", err);
-    console.error("❌ Error stack:", err.stack);
     return NextResponse.json(
       { 
         error: `Internal server error: ${err.message}`,
@@ -338,12 +411,12 @@ export async function POST(req: NextRequest) {
           "Could you tell me more about that?",
           "That's interesting. What do you think?",
           "I'd like to understand this better.",
+          "Thanks for sharing that.",
         ]
       },
       { status: 500 }
     );
   } finally {
-    // ✅ Always release the slot
     if (slotAcquired) {
       releaseSlot();
     }

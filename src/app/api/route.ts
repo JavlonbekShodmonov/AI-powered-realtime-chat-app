@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { v4 as uuidv4 } from "uuid";
 import { getServerSession } from "next-auth";
-import { authOptions } from "../../lib/auth"; // we’ll create this next
+import { authOptions } from "../../lib/auth";
 
 const meetings: any[] = []; // still temporary
 export async function GET() {
