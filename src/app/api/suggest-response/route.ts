@@ -10,7 +10,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_KEY });
 
 // ✅ Enhanced caching with longer duration
 const requestCache = new Map<string, { timestamp: number; suggestions: string[] }>();
-const CACHE_DURATION = 2 * 60 * 1000; // 2 minutes cache (increased from 30s)
+const CACHE_DURATION = 0; // 2 minutes cache (increased from 30s)
 const MAX_RETRIES = 1; // Reduced from 2 to save quota
 const RETRY_DELAY = 2000; // Increased to 2 seconds
 

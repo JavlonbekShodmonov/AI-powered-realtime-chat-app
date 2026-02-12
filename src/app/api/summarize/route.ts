@@ -10,7 +10,7 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_KEY });
 
 // ✅ CONFIGURATION - Adjust these based on your needs
 const CHUNK_SIZE = 2000; // Doubled for efficiency
-const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+const CACHE_DURATION = 0; // 30 minutes
 const DAILY_QUOTA = 1500; // Gemini free tier total
 const SAFETY_BUFFER = 0.9; // Use only 90% to be safe
 const MAX_DAILY_REQUESTS = Math.floor(DAILY_QUOTA * SAFETY_BUFFER * 0.5); // 675 for this endpoint (half of total)
