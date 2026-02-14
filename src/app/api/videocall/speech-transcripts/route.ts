@@ -6,7 +6,7 @@ import { ObjectId } from "mongodb";
 // Save speech transcript (from Web Speech API)
 export async function POST(req: NextRequest) {
   try {
-    const { roomId, userId, userName, text, timestamp } = await req.json();
+    const { roomId, userId, userName, text, timestamp, language } = await req.json();
 
     if (!roomId || !userId || !text) {
       return NextResponse.json(
@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
       userId,
       userName: userName || "Guest",
       text: text.trim(),
+      language: language || "en-US", // ✅ NOW SAVES THE LANGUAGE
       timestamp: timestamp || Date.now(),
       createdAt: new Date(),
     };
@@ -94,6 +95,7 @@ export async function GET(req: NextRequest) {
       userId: t.userId,
       userName: t.userName,
       text: t.text,
+      language: t.language, // ✅ NOW RETURNS THE LANGUAGE
       timestamp: t.timestamp,
     }));
 
