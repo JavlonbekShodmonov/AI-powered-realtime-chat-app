@@ -667,14 +667,21 @@ function EnterRoomButton({ appointment, router, locale }: any) {
       if (!isMounted) return;
       try {
         const res = await canEnterRoom(appointment._id);
-        if (isMounted) setStatus(res);
+        if (isMounted) {
+          setStatus(res);
+          // Stop polling once access is granted
+          if (res.allowed && interval) {
+            clearInterval(interval);
+            interval = null;
+          }
+        }
       } catch (err) {
         if (isMounted) setStatus({ allowed: false, reason: "Error" });
       }
     }
 
     check();
-    interval = setInterval(check, 3000);
+    interval = setInterval(check, 5000);
 
     return () => {
       isMounted = false;

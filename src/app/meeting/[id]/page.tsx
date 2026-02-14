@@ -1,10 +1,13 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { canEnterRoom } from "@/app/utils/roomApi";
 import Chat from "./Chat";
 import { useLocale } from "../../components/provider/locale-provider";
 import { useSession } from "next-auth/react";
+
+const MAX_ATTEMPTS = 5;
+const POLL_INTERVAL_MS = 5000;
 
 export default function MeetingPage({ params }: { params: { id: string } }) {
   const { locale } = useLocale();
@@ -13,57 +16,70 @@ export default function MeetingPage({ params }: { params: { id: string } }) {
   const [status, setStatus] = useState<{ allowed: boolean; reason?: string }>({
     allowed: false,
   });
-  const [isInitialCheck, setIsInitialCheck] = useState(true);
-  const [checkAttempts, setCheckAttempts] = useState(0);
+  const [phase, setPhase] = useState<"connecting" | "resolved">("connecting");
+  const attemptsRef = useRef(0);
 
   useEffect(() => {
     if (sessionStatus !== "authenticated") return;
 
-    let interval: NodeJS.Timeout;
-    
+    let interval: NodeJS.Timeout | undefined;
+    let cancelled = false;
+
     async function check() {
+      if (cancelled) return;
       try {
         const res = await canEnterRoom(appointmentId);
-        setCheckAttempts((prev) => prev + 1);
-        
-        // ✅ Allow entry after first check if user is authenticated
-        // This gives the socket time to connect
-        if (isInitialCheck && checkAttempts === 0) {
+        if (cancelled) return;
+
+        attemptsRef.current += 1;
+        const attempt = attemptsRef.current;
+
+        if (attempt === 1) {
+          // First check — allow entry immediately so the socket can connect
           console.log("🔓 Initial check - allowing entry for socket connection");
           setStatus({ allowed: true });
-          setIsInitialCheck(false);
-        } else if (res.allowed) {
-          setStatus(res);
+          setPhase("resolved");
           if (interval) clearInterval(interval);
-        } else {
-          // Only block after giving socket time to connect (3+ checks = 6+ seconds)
-          if (checkAttempts > 3) {
-            setStatus(res);
-          }
+          return;
+        }
+
+        if (res.allowed) {
+          setStatus(res);
+          setPhase("resolved");
+          if (interval) clearInterval(interval);
+        } else if (attempt >= MAX_ATTEMPTS) {
+          // Only deny after enough checks to give the socket time
+          setStatus(res);
+          setPhase("resolved");
+          if (interval) clearInterval(interval);
         }
       } catch (error) {
         console.error("❌ Error checking room access:", error);
-        // Allow entry on error to prevent being locked out
-        setStatus({ allowed: true });
+        if (!cancelled) {
+          setStatus({ allowed: true });
+          setPhase("resolved");
+          if (interval) clearInterval(interval);
+        }
       }
     }
 
     // Initial check
     check();
 
-    // Poll every 2s for up to 10 seconds
+    // Poll every 5s, up to MAX_ATTEMPTS
     interval = setInterval(() => {
-      if (checkAttempts < 5) {
-        check();
-      } else {
+      if (attemptsRef.current >= MAX_ATTEMPTS) {
         clearInterval(interval);
+      } else {
+        check();
       }
-    }, 2000);
+    }, POLL_INTERVAL_MS);
 
     return () => {
+      cancelled = true;
       if (interval) clearInterval(interval);
     };
-  }, [appointmentId, sessionStatus, checkAttempts, isInitialCheck]);
+  }, [appointmentId, sessionStatus]);
 
   // Show loading while authenticating
   if (sessionStatus === "loading") {
@@ -86,7 +102,7 @@ export default function MeetingPage({ params }: { params: { id: string } }) {
   }
 
   // Show connecting state during initial checks
-  if (!status.allowed && checkAttempts <= 3) {
+  if (phase === "connecting") {
     return (
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
