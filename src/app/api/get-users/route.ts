@@ -1,5 +1,4 @@
-//canEnter issue resolved.
-
+export const dynamic = 'force-dynamic';
 
 import { NextResponse } from "next/server";
 import clientPromise from "@/lib/mongodb";
