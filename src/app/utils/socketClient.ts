@@ -19,7 +19,7 @@ class SocketManager {
     return SocketManager.instance;
   }
 
-  connect(userId: string, serverUrl: string = "http://localhost:3001"): Socket {
+  connect(userId: string, username: string, serverUrl: string = "http://localhost:3001"): Socket {
     // If already connected to the same user, return existing socket
     if (this.socket?.connected && this.currentUserId === userId) {
       console.log("⚠️ Socket already connected for user:", userId);
@@ -35,7 +35,7 @@ class SocketManager {
     console.log("🔌 Creating new socket connection for user:", userId);
     
     this.socket = io(serverUrl, {
-      auth: { userId },
+      auth: { userId, username },
       transports: ["websocket", "polling"],
       reconnection: true,
       reconnectionDelay: 1000,
@@ -44,7 +44,8 @@ class SocketManager {
     });
 
     this.currentUserId = userId;
-
+    console.log("Connecting socket with:", { id: userId, name: username });
+    
     this.socket.on("connect", () => {
       console.log("✅ Socket connected:", this.socket?.id);
     });

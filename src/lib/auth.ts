@@ -26,18 +26,28 @@ export const authOptions: NextAuthOptions = {
   },
 
   pages: {
-    signIn: "/",  // ✅ Changed to match your actual sign-in page
+    signIn: "/", // ✅ Changed to match your actual sign-in page
   },
 
   callbacks: {
     async jwt({ token, user }) {
-      if (user) token.id = (user as any).id;
+      if (user) {
+        token.id = (user as any).id;
+        token.name = user.name; // ← add this
+        token.email = user.email; // ← add this too while you're here
+      }
       return token;
     },
     async session({ session, token }) {
-      if (token) session.user.id = token.id as string;
+      if (token) {
+        session.user.id = token.id as string;
+        session.user.name = token.name as string; // ← add this
+        session.user.email = token.email as string; // ← add this too
+      }
       return session;
     },
+    // redirect stays the same...
+
     // ✅ Add this callback to redirect after sign-in
     async redirect({ url, baseUrl }) {
       // If signing in, redirect to schedule
@@ -67,8 +77,8 @@ export async function auth(req?: Request) {
         cookies: Object.fromEntries(
           cookieHeader
             .split(";")
-            .map(c => c.trim().split("="))
-            .filter(([key]) => key)
+            .map((c) => c.trim().split("="))
+            .filter(([key]) => key),
         ),
       };
 

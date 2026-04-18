@@ -11,60 +11,76 @@ const CHUNK_SIZE = 1000;
 
 // Smart multilingual language detection with better scoring
 function detectLanguage(text: string): string {
-  if (!text || text.length < 10) return 'English';
+  if (!text || text.length < 10) return "English";
   const lowerText = text.toLowerCase();
-  
+
   // 1. NON-LATIN/NON-CYRILLIC (True unique scripts - leave these as immediate)
-  if (/[\u4e00-\u9fa5]/.test(text)) return 'Chinese';
-  if (/[\u0600-\u06FF]/.test(text)) return 'Arabic';
-  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(text)) return 'Japanese';
-  if (/[\uAC00-\uD7AF]/.test(text)) return 'Korean';
-  if (/[\u0E00-\u0E7F]/.test(text)) return 'Thai';
-  if (/[\u0590-\u05FF]/.test(text)) return 'Hebrew';
+  if (/[\u4e00-\u9fa5]/.test(text)) return "Chinese";
+  if (/[\u0600-\u06FF]/.test(text)) return "Arabic";
+  if (/[\u3040-\u309F\u30A0-\u30FF]/.test(text)) return "Japanese";
+  if (/[\uAC00-\uD7AF]/.test(text)) return "Korean";
+  if (/[\u0E00-\u0E7F]/.test(text)) return "Thai";
+  if (/[\u0590-\u05FF]/.test(text)) return "Hebrew";
 
   // 2. INITIALIZE SCORES
   const scores: { [key: string]: number } = {
-    'English': 0, 'Uzbek': 0, 'Russian': 0, 'Spanish': 0, 'Portuguese': 0,
-    'French': 0, 'German': 0, 'Italian': 0, 'Turkish': 0, 'Kazakh': 0,
-    'Ukrainian': 0, 'Tajik': 0, 'Azerbaijani': 0
+    English: 0,
+    Uzbek: 0,
+    Russian: 0,
+    Spanish: 0,
+    Portuguese: 0,
+    French: 0,
+    German: 0,
+    Italian: 0,
+    Turkish: 0,
+    Kazakh: 0,
+    Ukrainian: 0,
+    Tajik: 0,
+    Azerbaijani: 0,
   };
 
   // 3. SCORE LATIN & COMMON PATTERNS (Standard weight: 10)
   const latinPatterns: { [key: string]: RegExp } = {
-    'English': /\b(the|and|this|that|with|from|have|would|should|could|hello|start)\b/gi,
-    'Uzbek': /\b(o'zbekiston|bo'lish|qilish|shunday|bugun|hozir|rahmat|salom)\b/gi,
-    'Turkish': /\b(türkiye|olmak|etmek|nasıl|neden|için|teşekkür)\b/gi,
-    'Spanish': /\b(español|hacer|decir|pero|para|con|este|gracias)\b/gi,
-    'Portuguese': /\b(português|fazer|dizer|você|então|muito|obrigado)\b/gi,
-    'French': /\b(français|faire|dire|dans|pour|avec|quel|merci)\b/gi,
-    'German': /\b(deutsch|machen|sagen|nicht|aber|alles|danke)\b/gi,
-    'Italian': /\b(italiano|fare|dire|questo|perché|tutto|grazie)\b/gi,
-    'Azerbaijani': /\b(azərbaycan|olmaq|etmək|necə|niyə|təşəkkür)\b/gi
+    English:
+      /\b(the|and|this|that|with|from|have|would|should|could|hello|start|are|was|were|is|you|your|we|our|they|their|it|its|be|been|has|had|do|does|did|will|can|may|but|or|if|so|as|at|by|an)\b/gi,
+    Uzbek:
+      /\b(o'zbekiston|bo'lish|qilish|shunday|bugun|hozir|rahmat|salom)\b/gi,
+    Turkish: /\b(türkiye|olmak|etmek|nasıl|neden|için|teşekkür)\b/gi,
+    Spanish: /\b(español|hacer|decir|pero|para|con|este|gracias)\b/gi,
+    Portuguese: /\b(português|fazer|dizer|você|então|muito|obrigado)\b/gi,
+    French: /\b(français|faire|dire|dans|pour|avec|quel|merci)\b/gi,
+    German: /\b(deutsch|machen|sagen|nicht|aber|alles|danke)\b/gi,
+    Italian: /\b(italiano|fare|dire|questo|perché|tutto|grazie)\b/gi,
+    Azerbaijani: /\b(azərbaycan|olmaq|etmək|necə|niyə|təşəkkür)\b/gi,
   };
 
-  Object.keys(latinPatterns).forEach(lang => {
+  Object.keys(latinPatterns).forEach((lang) => {
     scores[lang] = (lowerText.match(latinPatterns[lang]) || []).length * 10;
   });
 
   // 4. SCORE CYRILLIC PATTERNS (Only if Cyrillic characters are present)
   if (/[\u0400-\u04FF]/.test(text)) {
     // Unique characters for specific languages
-    scores['Uzbek'] += (text.match(/[ўқғҳ]/g) || []).length * 15;
-    scores['Kazakh'] += (text.match(/[әғқңөұүһі]/g) || []).length * 15;
-    scores['Tajik'] += (text.match(/[ӣӯҳқғҷ]/g) || []).length * 15;
-    scores['Ukrainian'] += (text.match(/[єіїґ]/g) || []).length * 15;
-    
+    scores["Uzbek"] += (text.match(/[ўқғҳ]/g) || []).length * 15;
+    scores["Kazakh"] += (text.match(/[әғқңөұүһі]/g) || []).length * 15;
+    scores["Tajik"] += (text.match(/[ӣӯҳқғҷ]/g) || []).length * 15;
+    scores["Ukrainian"] += (text.match(/[єіїґ]/g) || []).length * 15;
+
     // Russian common words (Standard weight)
-    const russianWords = (lowerText.match(/\b(и|в|не|на|я|быть|что|с|а|по|это|как|так|все|его|для|или|ты)\b/g) || []).length;
-    scores['Russian'] = russianWords * 10;
+    const russianWords = (
+      lowerText.match(
+        /\b(и|в|не|на|я|быть|что|с|а|по|это|как|так|все|его|для|или|ты)\b/g,
+      ) || []
+    ).length;
+    scores["Russian"] = russianWords * 10;
   }
 
   // 5. UZBEK LATIN SPECIAL CASE (Apostrophes are very heavy indicators)
-  const apostropheCount = (text.match(/[a-z]'[a-z]/gi) || []).length;
-  scores['Uzbek'] += (apostropheCount * 15);
+  const uzbekApostrophe = (text.match(/\b(o'|g'|O'|G')\w/g) || []).length;
+  scores["Uzbek"] += uzbekApostrophe * 15;
 
   // 6. CALCULATE WINNER
-  let winner = 'English';
+  let winner = "English";
   let maxScore = 0;
 
   for (const [lang, score] of Object.entries(scores)) {
@@ -75,7 +91,7 @@ function detectLanguage(text: string): string {
   }
 
   // Default to English if the match is too weak (avoids false positives)
-  return maxScore >= 10 ? winner : 'English';
+  return maxScore >= 10 ? winner : "English";
 }
 
 function chunkText(text: string, size: number) {
@@ -161,6 +177,7 @@ export async function POST(req: NextRequest) {
       isVideoCall = false,
       callStartTime,
       callEndTime,
+      overrideLanguage,
     } = await req.json();
 
     console.log("📥 Summarize request:", {
@@ -348,12 +365,15 @@ export async function POST(req: NextRequest) {
       "hi-IN": "Hindi",
     };
 
-    // For video calls, check transcript metadata first
-    if (isVideoCall && allMessages.length > 0) {
+    if (overrideLanguage) {
+      // User explicitly selected a language — use it directly
+      detectedLanguage = langMap[overrideLanguage] || "English";
+      console.log(`🌍 Using user-selected language: ${detectedLanguage}`);
+    } else if (isVideoCall && allMessages.length > 0) {
+      // Video call without override — check transcript metadata
       const languages = allMessages
         .map((m: any) => m.language)
         .filter((l: string) => l);
-
       if (languages.length > 0) {
         const langCount: any = {};
         languages.forEach((l: string) => {
@@ -363,18 +383,13 @@ export async function POST(req: NextRequest) {
           (a: any, b: any) => b[1] - a[1],
         )[0][0];
         detectedLanguage = langMap[mostCommon] || "English";
-        console.log(
-          `✅ Using language from video transcripts: ${detectedLanguage} (${languages.length} transcripts had metadata)`,
-        );
       } else {
         detectedLanguage = detectLanguage(fullChatText);
       }
-    }
-    // For regular chat, use smart text detection
-    else {
+    } else {
+      // Regular chat — auto detect
       detectedLanguage = detectLanguage(fullChatText);
     }
-
     console.log(`🌍 Final language for summary: ${detectedLanguage}`);
 
     // Filter by userId if provided

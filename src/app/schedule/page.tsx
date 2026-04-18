@@ -2,8 +2,8 @@
 
 import DatePicker from "react-datepicker";
 import React, { useEffect, useState, useRef } from "react";
-import "react-datepicker/dist/react-datepicker.css";
 import { useRouter } from "next/navigation";
+import "react-datepicker/dist/react-datepicker.css";
 import { canEnterRoom } from "../utils/roomApi";
 import { useSession } from "next-auth/react";
 import { socketManager } from "../utils/socketClient";
@@ -222,6 +222,7 @@ export default function FirstPage() {
 
     const socket = socketManager.connect(
       user.id,
+      user.name,
       process.env.NEXT_PUBLIC_SOCKET_SERVER_URL ||
         "https://shadmanov-socket.onrender.com",
     );
