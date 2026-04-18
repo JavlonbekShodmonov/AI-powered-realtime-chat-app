@@ -300,16 +300,98 @@ export default function Home() {
               </a>
             </p>
           </div>
+
+          {/* --- PITCH DAY REQUIREMENTS SECTION --- */}
+          <div className="relative z-20 mt-20 pt-10 border-t border-white/10">
+            <div className="max-w-3xl mx-auto text-left space-y-12">
+              {/* DEMO BUTTON - High Visibility */}
+              <div className="text-center">
+                <a
+                  href="/demo"
+                  className="inline-block px-8 py-4 bg-orange-600 hover:bg-orange-500 text-white text-2xl font-black rounded-full shadow-lg shadow-orange-900/20 transition-all hover:scale-110 active:scale-95 cursor-pointer"
+                  style={{ position: "relative", zIndex: 50 }}
+                >
+                  🚀 GO TO DEMO PAGE
+                </a>
+              </div>
+
+              {/* 1. Problem & Solution */}
+              <section className="text-slate-200">
+                <h2 className="text-2xl font-bold text-cyan-400 mb-4">
+                  1. Problem & Solution
+                </h2>
+                <p className="mb-4">
+                  <strong className="text-white">Problem:</strong> Teams waste
+                  30% of their time in meetings without clear documentation,
+                  leading to lost action items and misalignment.
+                </p>
+                <p>
+                  <strong className="text-white">Solution:</strong> Summeet uses
+                  AI to capture, transcribe, and summarize meetings instantly,
+                  ensuring nothing is ever forgotten.
+                </p>
+              </section>
+
+              {/* 2 & 3. Team & Stack */}
+              <section className="text-slate-200">
+                <h2 className="text-2xl font-bold text-cyan-400 mb-4">
+                  2. The Team
+                </h2>
+                <p className="mb-2">
+                  <strong className="text-white">Roles:</strong> CEO, CFO, CTO,
+                  Mobilographer
+                </p>
+                <p className="mb-4">
+                  <strong className="text-white">Stack:</strong> Next.js,
+                  TypeScript, Node.js, MongoDB, Gemini API
+                </p>
+                <p>
+                  <strong className="text-white">Why us:</strong> We are a
+                  diverse team of specialists passionate about solving workplace
+                  inefficiency through cutting-edge AI integration.
+                </p>
+              </section>
+
+              {/* 4. Roadmap */}
+              <section className="text-slate-200">
+                <h2 className="text-2xl font-bold text-cyan-400 mb-4">
+                  3. Roadmap
+                </h2>
+                <ul className="space-y-3">
+                  <li>
+                    ✅ <strong className="text-white">Idea:</strong> July 2025
+                  </li>
+                  <li>
+                    📅 <strong className="text-white">MVP:</strong> September
+                    2025
+                  </li>
+                  <li>
+                    🌍 <strong className="text-white">Launched:</strong>{" "}
+                    November 2025
+                  </li>
+                </ul>
+              </section>
+
+              {/* 5. Implementation */}
+              <section className="text-slate-200 pb-20">
+                <h2 className="text-2xl font-bold text-cyan-400 mb-4">
+                  4. Implementation Plan
+                </h2>
+                <p>
+                  We leverage{" "}
+                  <strong className="text-white">Whisper API</strong> for
+                  high-accuracy speech-to-text and{" "}
+                  <strong className="text-white">Gemini AI</strong> for
+                  intelligent summarization. Our architecture utilizes{" "}
+                  <strong className="text-white">Vercel Edge</strong> for global
+                  low-latency performance.
+                </p>
+              </section>
+            </div>
+          </div>
         </div>
       </div>
-      {/* Footer */}
-      <footer className="relative z-10 py-6 px-4 text-center border-t border-white/5">
-        <p className="text-slate-500 text-sm">
-          {locale === "ru"
-            ? "© 2026 СумМит. Все права защищены."
-            : "© 2026 SumMeet. All rights reserved."}
-        </p>
-      </footer>
+      {/* Animation Styles */}
       {/* Custom animations */}
       <style jsx>{`
         @import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap");
@@ -355,71 +437,15 @@ export default function Home() {
         }}
       >
         <hr />
-
-        {/* 1. Problem & Solution */}
-        <section className="text-neutral-50">
-          <a href="/demo" className="text-orange-600 hover:text-orange-500 text-xl font-bold mb-4 inline-block">
-            DEMO PAGE
-          </a>
-          <h2>1. Problem & Solution</h2>
-          <p>
-            <strong>Problem:</strong> Teams waste 30% of their time in meetings
-            without clear documentation, leading to lost action items and
-            misalignment.
-          </p>
-          <p>
-            <strong>Solution:</strong> Summeet uses AI to capture, transcribe,
-            and summarize meetings instantly, ensuring nothing is ever
-            forgotten.
-          </p>
-        </section>
-
-        {/* 2 & 3. Team & Why Us */}
-        <section className="text-neutral-50">
-          <h2>2. The Team</h2>
-          <p>
-            <strong>Roles:</strong> CEO, CFO, CTO, Mobilographer, 
-          </p>
-          <p>
-            <strong>Stack:</strong> Next.js, TypeScript, Node.js, MongoDB,
-            GEMINI API.
-          </p>
-          <p>
-            <strong>Why us:</strong> We have deep experience in building MERN
-            applications and a passion for solving workplace inefficiency with
-            LLMs.
-          </p>
-        </section>
-
-        {/* 4. Roadmap */}
-        <section className="text-neutral-50">
-          <h2>3. Roadmap</h2>
-          <ul style={{ listStyle: "none", padding: 0 }}>
-            <li>
-              ✅ <strong>Idea:</strong> Conceptualized in july 2025
-            </li>
-            <li>
-              📅 <strong>MVP:</strong> Feature-complete version with user auth september 2025
-          
-            </li>
-            <li>
-              🌍 <strong>Launched:</strong> Public beta release november 2025
-            </li>
-          </ul>
-        </section>
-
-        {/* 5. Implementation Plan */}
-        <section className="text-neutral-50">
-          <h2>4. Implementation Plan</h2>
-          <p>
-            We use <strong>Whisper API</strong> for high-accuracy speech-to-text
-            and <strong>Gemini AI</strong> for intelligent summarization. The
-            architecture is built on a scalable <strong>Next.js</strong>{" "}
-            frontend with a <strong>Vercel</strong> edge deployment for low
-            latency.
-          </p>
-        </section>
       </div>
+      {/* Footer */}
+      <footer className="relative z-20 py-6 px-4 text-center border-t border-white/5 bg-slate-950/80 backdrop-blur-md">
+        <p className="text-slate-500 text-sm">
+          {locale === "ru"
+            ? "© 2026 СумМит. Все права защищены."
+            : "© 2026 SumMeet. All rights reserved."}
+        </p>
+      </footer>
     </main>
   );
 }
