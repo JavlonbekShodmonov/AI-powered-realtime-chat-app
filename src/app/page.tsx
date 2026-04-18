@@ -357,7 +357,10 @@ export default function Home() {
         <hr />
 
         {/* 1. Problem & Solution */}
-        <section>
+        <section className="text-neutral-50">
+          <a href="/demo" className="text-orange-600 hover:text-orange-500 text-xl font-bold mb-4 inline-block">
+            DEMO PAGE
+          </a>
           <h2>1. Problem & Solution</h2>
           <p>
             <strong>Problem:</strong> Teams waste 30% of their time in meetings
@@ -372,7 +375,7 @@ export default function Home() {
         </section>
 
         {/* 2 & 3. Team & Why Us */}
-        <section>
+        <section className="text-neutral-50">
           <h2>2. The Team</h2>
           <p>
             <strong>Roles:</strong> CEO, CFO, CTO, Mobilographer, 
@@ -389,7 +392,7 @@ export default function Home() {
         </section>
 
         {/* 4. Roadmap */}
-        <section>
+        <section className="text-neutral-50">
           <h2>3. Roadmap</h2>
           <ul style={{ listStyle: "none", padding: 0 }}>
             <li>
@@ -406,7 +409,7 @@ export default function Home() {
         </section>
 
         {/* 5. Implementation Plan */}
-        <section>
+        <section className="text-neutral-50">
           <h2>4. Implementation Plan</h2>
           <p>
             We use <strong>Whisper API</strong> for high-accuracy speech-to-text

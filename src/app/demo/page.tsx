@@ -9,7 +9,7 @@ export default function DemoPage() {
       <div style={{ position: 'relative', paddingBottom: '56.25%', height: 0, overflow: 'hidden', marginBottom: '20px', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}>
         <iframe 
           style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%' }}
-          src="https://youtu.be/RU7TPAPqQDc" 
+          src="https://www.youtube.com/embed/RU7TPAPqQDc?si=xEemGyjqW4lY1HTv" 
           title="Summeet Demo Video"
           frameBorder="0"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
