@@ -16,6 +16,7 @@ import {
   Users,
   AlertCircle,
 } from "lucide-react";
+import DailyIframe from "@daily-co/daily-js";
 
 interface Transcript {
   _id: string;
@@ -30,6 +31,7 @@ interface VideoCallWithTranscriptionProps {
   displayName?: string;
   userId: string;
   onClose?: () => void;
+  token: string | null;
 }
 
 export default function VideoCallWithTranscription({
@@ -37,6 +39,7 @@ export default function VideoCallWithTranscription({
   displayName = "Guest",
   userId,
   onClose,
+  token,
 }: VideoCallWithTranscriptionProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
@@ -55,6 +58,8 @@ export default function VideoCallWithTranscription({
   const isProcessingRef = useRef(false);
   const restartTimeoutRef = useRef<any>(null);
   const [showMobileWarning, setShowMobileWarning] = useState(true);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const frameRef = useRef<any>(null);
 
   const LANGUAGES = [
     { code: "en-US", name: "English (US)", flag: "🇺🇸" },
@@ -97,6 +102,44 @@ export default function VideoCallWithTranscription({
     { code: "az-AZ", name: "Azərbaycan dili", flag: "🇦🇿" },
   ];
 
+  useEffect(() => {
+    if (!containerRef.current || frameRef.current) return;
+
+    // Initialize the Daily Frame inside your containerRef
+    const callFrame = DailyIframe.createFrame(containerRef.current, {
+      iframeStyle: {
+        width: "100%",
+        height: "100%",
+        border: "0",
+        backgroundColor: "#111827", // Match your bg-gray-900
+      },
+      showLeaveButton: true,
+      userName: displayName,
+    });
+
+    frameRef.current = callFrame;
+
+    // The Room URL (Replace 'summeet' with your actual Daily subdomain)
+    const roomUrl = `https://summeet.daily.co/${roomName}`;
+
+    // Join the call using the Token from your backend
+    callFrame.join({ url: roomUrl, token: token! });
+
+    // Handle events
+    callFrame.on("joined-meeting", () => setIsLoading(false));
+
+    callFrame.on("left-meeting", () => {
+      if (onClose) onClose();
+    });
+
+    return () => {
+      if (frameRef.current) {
+        frameRef.current.destroy();
+        frameRef.current = null;
+      }
+    };
+  }, [roomName, token, displayName, onClose]);
+
   const isMobile = () => {
     if (typeof window === "undefined") return false;
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
@@ -104,17 +147,8 @@ export default function VideoCallWithTranscription({
     );
   };
 
-  const isSpeechRecognitionSupported = () => {
-    if (typeof window === "undefined") return false;
-    return (
-      !!(window as any).SpeechRecognition ||
-      !!(window as any).webkitSpeechRecognition
-    );
-  };
-
   // Clean room name and create video URLs
   const cleanRoom = roomName.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
-  const videoUrl = `https://8x8.vc/${process.env.NEXT_PUBLIC_JAAS_APP_ID}/${cleanRoom}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&userInfo.displayName="${encodeURIComponent(displayName)}"&interfaceConfig.SHOW_JITSI_WATERMARK=false&interfaceConfig.SHOW_WATERMARK_FOR_GUESTS=false`;
   const uniqueUsers = Array.from(
     new Map(
       transcripts.map((t) => [t.userId, { id: t.userId, name: t.userName }]),
@@ -592,13 +626,11 @@ export default function VideoCallWithTranscription({
           </div>
         )}
 
-        {/* Jitsi Embed */}
-        <iframe
-          src={videoUrl}
-          allow="camera; microphone; fullscreen; speaker; display-capture; autoplay"
+        {/* NEW: Daily Container (Replaces Jitsi Iframe) */}
+        <div
+          ref={containerRef}
           className="w-full h-full border-0"
-          title="Video Chat"
-          onLoad={() => setIsLoading(false)}
+          // This div will now hold the Daily video interface
         />
 
         {/* Mobile Warning Banner - Dismissible */}

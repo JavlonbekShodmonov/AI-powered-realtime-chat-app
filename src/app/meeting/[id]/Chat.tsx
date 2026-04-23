@@ -11,6 +11,7 @@ import { useLocale } from "../../components/provider/locale-provider";
 import VideoChatButton from "../../components/VideoChatButton";
 import CallNotification from "../../components/CallNotification";
 import VideoCallWithTranscription from "@/app/components/VideoCallWithTranscription";
+import DailyIframe from "@daily-co/daily-js";
 
 declare module "next-auth" {
   interface Session {
@@ -44,7 +45,6 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
   const [newMessage, setNewMessage] = useState("");
   const [summary, setSummary] = useState("");
   const [loadingSummary, setLoadingSummary] = useState(false);
-  const [roomUsers, setRoomUsers] = useState<string[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<
     { id: string; name: string }[]
   >([]);
@@ -413,24 +413,35 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
     }
   };
 
-  const handleAcceptCall = () => {
+  // Inside your main file
+  const [callToken, setCallToken] = useState<string | null>(null);
+
+  const handleAcceptCall = async () => {
     if (!incomingCall) return;
 
-    console.log("✅ Joining embedded call with AI features");
+    try {
+      // 1. Fetch the token from your new API (Invisible login)
+      const res = await fetch("/api/video/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomName: roomId }),
+      });
+      const { token } = await res.json();
+      setCallToken(token);
 
-    // ✅ Join the embedded call with transcription/summary features
-    setShowEmbeddedCall(true);
-    setCallStartTime(Date.now());
-
-    // Send join message
-    handleSendCallMessage(
-      locale === "ru"
-        ? `📞 ${session?.user?.name} присоединился к видеозвонку`
-        : `📞 ${session?.user?.name} joined the video call`,
-    );
-
-    // Clear the notification
-    setIncomingCall(null);
+      // 2. Existing Socket Logic
+      setShowEmbeddedCall(true);
+      setCallStartTime(Date.now());
+      handleSendCallMessage(
+        locale === "ru"
+          ? `📞 ${session?.user?.name} присоединился к звонку`
+          : `📞 ${session?.user?.name} joined the video call`,
+      );
+      setIncomingCall(null);
+    } catch (error) {
+      console.error("Failed to join call:", error);
+      alert("Failed to join call. Please try again.");
+    }
   };
 
   const handleCloseEmbeddedCall = () => {
@@ -519,6 +530,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
   // ✅ Render embedded video call if active
   if (showEmbeddedCall && session?.user) {
+    const [callToken, setCallToken] = useState<string | null>(null);
     return (
       <div className="fixed inset-0 z-50 bg-gray-900">
         <VideoCallWithTranscription
@@ -526,6 +538,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
           displayName={session.user.name || "Guest"}
           userId={session.user.id!}
           onClose={handleCloseEmbeddedCall}
+          token={callToken}
         />
       </div>
     );
@@ -574,7 +587,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                 {roomId}
               </span>
             </div>
-            
+
             <div className="flex items-center gap-3">
               {/* Online Users Count */}
               <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-green-50 rounded-lg border border-green-200">
@@ -621,11 +634,13 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden relative">
         {/* Chat Area */}
-        <div 
+        <div
           className="flex-1 flex flex-col overflow-hidden"
           style={{
-            width: isSummaryPanelOpen ? `calc(100% - ${summaryPanelWidth}px)` : '100%',
-            transition: 'width 0.3s ease'
+            width: isSummaryPanelOpen
+              ? `calc(100% - ${summaryPanelWidth}px)`
+              : "100%",
+            transition: "width 0.3s ease",
           }}
         >
           <div className="flex-1 max-w-5xl mx-auto w-full px-4 py-6 flex flex-col gap-4 overflow-hidden">
@@ -650,11 +665,13 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                     {locale === "ru" ? "В комнате:" : "In room:"}
                   </span>
                 </div>
-                
+
                 <div className="flex flex-wrap gap-2">
                   {onlineUsers.length === 0 ? (
                     <span className="text-sm text-slate-400 italic">
-                      {locale === "ru" ? "Нет пользователей" : "No users online"}
+                      {locale === "ru"
+                        ? "Нет пользователей"
+                        : "No users online"}
                     </span>
                   ) : (
                     onlineUsers.map((u) => (
@@ -664,7 +681,8 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                       >
                         <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                         <span className="text-sm font-medium text-slate-700">
-                          {u.name || (locale === "ru" ? "Анонимный" : "Anonymous")}
+                          {u.name ||
+                            (locale === "ru" ? "Анонимный" : "Anonymous")}
                         </span>
                       </div>
                     ))
@@ -697,9 +715,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                         />
                       </svg>
                       <p className="text-lg font-medium">
-                        {locale === "ru"
-                          ? "Нет сообщений"
-                          : "No messages yet"}
+                        {locale === "ru" ? "Нет сообщений" : "No messages yet"}
                       </p>
                       <p className="text-sm mt-2">
                         {locale === "ru"
@@ -752,9 +768,13 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                               {msg.senderId === session?.user?.id && (
                                 <div className="flex items-center gap-1.5">
                                   <button
-                                    onClick={() => handleUpdate(String(msg._id))}
+                                    onClick={() =>
+                                      handleUpdate(String(msg._id))
+                                    }
                                     className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-all duration-200"
-                                    title={locale === "ru" ? "Редактировать" : "Edit"}
+                                    title={
+                                      locale === "ru" ? "Редактировать" : "Edit"
+                                    }
                                   >
                                     <svg
                                       className="w-3.5 h-3.5"
@@ -771,9 +791,13 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                                     </svg>
                                   </button>
                                   <button
-                                    onClick={() => handleDelete(String(msg._id))}
+                                    onClick={() =>
+                                      handleDelete(String(msg._id))
+                                    }
                                     className="p-1.5 rounded-lg bg-white/20 hover:bg-red-400 transition-all duration-200"
-                                    title={locale === "ru" ? "Удалить" : "Delete"}
+                                    title={
+                                      locale === "ru" ? "Удалить" : "Delete"
+                                    }
                                   >
                                     <svg
                                       className="w-3.5 h-3.5"
@@ -811,7 +835,9 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                   <input
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSend()}
+                    onKeyDown={(e) =>
+                      e.key === "Enter" && !e.shiftKey && handleSend()
+                    }
                     placeholder={
                       locale === "ru"
                         ? "Введите сообщение..."
@@ -856,7 +882,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
                   locale={locale}
                 />
               )}
-              
+
               <VideoChatButton
                 meetingId={roomId}
                 userId={session?.user?.id || ""}
@@ -881,7 +907,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
           <div
             ref={resizeRef}
             className="absolute left-0 top-0 w-1 h-full cursor-ew-resize hover:bg-indigo-400 bg-indigo-200 transition-colors duration-200"
-            style={{ marginLeft: '-4px', width: '8px' }}
+            style={{ marginLeft: "-4px", width: "8px" }}
           />
 
           <div className="h-full flex flex-col">

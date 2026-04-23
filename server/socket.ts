@@ -62,7 +62,7 @@ const userSubscriptions = new Map<string, any>(); // userId -> push subscription
 
 const allowedOrigins = [
   "http://localhost:3000",
-  "https://shadmanov.onrender.com",
+  "https://summeet.vercel.app",
 ];
 
 const io = new Server(server, {
