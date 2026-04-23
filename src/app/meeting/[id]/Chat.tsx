@@ -26,7 +26,6 @@ declare module "next-auth" {
 
 type ChatProps = {
   roomId: string;
-  targetUserId?: string;
 };
 
 interface IncomingCall {
@@ -34,7 +33,7 @@ interface IncomingCall {
   meetingId: string;
 }
 
-export default function Chat({ roomId, targetUserId }: ChatProps) {
+export default function Chat({ roomId }: ChatProps) {
   const { data: session, status } = useSession();
   const { locale } = useLocale();
   const router = useRouter();
@@ -421,7 +420,7 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
 
     try {
       // 1. Fetch the token from your new API (Invisible login)
-      const res = await fetch("/api/video/token", {
+      const res = await fetch("/api/videocall/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ roomName: roomId }),
