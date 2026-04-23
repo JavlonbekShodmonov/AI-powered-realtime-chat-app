@@ -103,15 +103,17 @@ export default function VideoCallWithTranscription({
   ];
 
   useEffect(() => {
-    if (!containerRef.current || frameRef.current) return;
+    // 1. Guard: Only run if we have a container, a token, and NOT an existing frame
+    if (!containerRef.current || !token || frameRef.current) return;
 
-    // Initialize the Daily Frame inside your containerRef
+    console.log("🚀 Initializing Daily frame with token...");
+
     const callFrame = DailyIframe.createFrame(containerRef.current, {
       iframeStyle: {
         width: "100%",
         height: "100%",
         border: "0",
-        backgroundColor: "#111827", // Match your bg-gray-900
+        backgroundColor: "#111827",
       },
       showLeaveButton: true,
       userName: displayName,
@@ -119,21 +121,22 @@ export default function VideoCallWithTranscription({
 
     frameRef.current = callFrame;
 
-    // The Room URL (Replace 'summeet' with your actual Daily subdomain)
     const roomUrl = `https://summeet.daily.co/${roomName}`;
 
-    // Join the call using the Token from your backend
-    callFrame.join({ url: roomUrl, token: token! });
+    // 2. Join the call
+    callFrame
+      .join({ url: roomUrl, token })
+      .catch((err) => console.error("Daily join error:", err));
 
-    // Handle events
+    // 3. Events
     callFrame.on("joined-meeting", () => setIsLoading(false));
+    callFrame.on("left-meeting", () => onClose?.());
+    callFrame.on("error", (e) => console.error("Daily SDK Error:", e));
 
-    callFrame.on("left-meeting", () => {
-      if (onClose) onClose();
-    });
-
+    // 4. CRITICAL CLEANUP: This prevents the "Duplicate Instance" error
     return () => {
       if (frameRef.current) {
+        console.log("🧹 Destroying Daily instance...");
         frameRef.current.destroy();
         frameRef.current = null;
       }

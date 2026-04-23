@@ -426,11 +426,14 @@ export default function Chat({ roomId, targetUserId }: ChatProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ roomName: roomId }),
       });
-      const { token } = await res.json();
-      setCallToken(token);
-
-      // 2. Existing Socket Logic
-      setShowEmbeddedCall(true);
+      // In Chat.tsx handleAcceptCall
+      const data = await res.json();
+      if (data.token && typeof data.token === "string") {
+        setCallToken(data.token);
+        setShowEmbeddedCall(true);
+      } else {
+        console.error("Token received is not a string:", data.token);
+      }
       setCallStartTime(Date.now());
       handleSendCallMessage(
         locale === "ru"
