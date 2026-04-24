@@ -417,13 +417,15 @@ export default function Chat({ roomId }: ChatProps) {
 
   const handleAcceptCall = async () => {
     if (!incomingCall) return;
+    
+    const roomToJoin = incomingCall.meetingId || roomId;
 
     try {
       // 1. Fetch the token from your new API (Invisible login)
       const res = await fetch("/api/videocall/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomName: roomId }),
+        body: JSON.stringify({ roomName: roomToJoin }),
       });
       // In Chat.tsx handleAcceptCall
       const data = await res.json();
