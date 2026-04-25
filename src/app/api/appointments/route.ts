@@ -21,6 +21,36 @@ export async function POST(req: Request) {
 
     await appointment.save();
 
+    const DAILY_API_KEY = process.env.DAILY_API_KEY;
+    const dailyRoomName = `summeet-${appointment._id}`; // Unique name based on DB ID
+
+    try {
+      const dailyResponse = await fetch("https://api.daily.co/v1/rooms", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${DAILY_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: dailyRoomName,
+          properties: {
+            // Set expiry to 24 hours after the scheduled time (safety first!)
+            exp: Math.floor(new Date(scheduledAt).getTime() / 1000) + 86400,
+            eject_at_room_exp: true,
+            enable_chat: true,
+          },
+        }),
+      });
+
+      if (dailyResponse.ok) {
+        console.log("✅ Daily Room Created:", dailyRoomName);
+      }
+    } catch (dailyError) {
+      console.error("⚠️ Failed to pre-create Daily room:", dailyError);
+      // We don't crash the whole request if Daily is slow,
+      // but it's good to have it ready.
+    }
+
     console.log("📅 Appointment created:", appointment._id);
 
     // ✅ Fetch creator info separately to avoid serialization issues
@@ -37,7 +67,7 @@ export async function POST(req: Request) {
       // Get participant names
       if (Array.isArray(withUserId)) {
         const users = await User.find({ _id: { $in: withUserId } }).select(
-          "username email name"
+          "username email name",
         );
         withUserNames = users.map((u: any) => u.name || u.username || u.email);
       }
@@ -84,7 +114,7 @@ export async function POST(req: Request) {
         console.error(
           "❌ Socket server returned error:",
           response.status,
-          errorText
+          errorText,
         );
       }
     } catch (emitError) {
@@ -120,7 +150,7 @@ export async function GET(req: Request) {
 
     return NextResponse.json(
       appointments.map((a) => a.toObject()),
-      { status: 200 }
+      { status: 200 },
     );
   } catch (error) {
     console.error("Error fetching appointments:", error);
@@ -154,7 +184,7 @@ export async function PATCH(req: Request) {
 
     try {
       const creator = await User.findById(appointment.createdBy).select(
-        "username email name"
+        "username email name",
       );
       if (creator) {
         creatorName = creator.name || creator.username || creator.email;
@@ -175,7 +205,7 @@ export async function PATCH(req: Request) {
       const socketUrl =
         process.env.SOCKET_SERVER_URL || "http://localhost:3001";
       console.log(
-        `🔌 Sending appointment update to socket server: ${socketUrl}`
+        `🔌 Sending appointment update to socket server: ${socketUrl}`,
       );
 
       const socketPayload = {
@@ -206,7 +236,7 @@ export async function PATCH(req: Request) {
         console.error(
           "❌ Socket server returned error:",
           response.status,
-          errorText
+          errorText,
         );
       }
     } catch (emitError) {
