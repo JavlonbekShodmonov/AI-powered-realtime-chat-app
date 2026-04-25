@@ -88,11 +88,9 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        properties: {
-          room_name: sanitizedRoomName,
-          is_owner: true,
-          exp: Math.floor(Date.now() / 1000) + 1800, // 30 min safety
-        },
+        room_name: sanitizedRoomName,
+        is_owner: true,
+        exp: Math.floor(Date.now() / 1000) + 1800, // 30 min safety
       }),
     });
 
