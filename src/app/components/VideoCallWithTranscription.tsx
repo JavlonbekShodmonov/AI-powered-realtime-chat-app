@@ -104,55 +104,84 @@ export default function VideoCallWithTranscription({
   ];
 
   useEffect(() => {
-    // 1. Guard: Only run if we have a container, a token, and NOT an existing frame
-    if (!containerRef.current || !token || frameRef.current || isInitializing.current) return;
+    // 1. Guard: Only run if we have a container and a token
+    if (!containerRef.current || !token) {
+      console.log("⏭️ Skipping initialization: missing container or token");
+      return;
+    }
+
+    // If frame already exists, don't create another one
+    if (frameRef.current) {
+      console.log("⏭️ Frame already exists, skipping initialization");
+      return;
+    }
+
+    // Double-check that we're not already initializing
+    if (isInitializing.current) {
+      console.log("⏭️ Already initializing, skipping");
+      return;
+    }
 
     isInitializing.current = true;
-
     console.log("🚀 Initializing Daily frame with token...");
 
-    const callFrame = DailyIframe.createFrame(containerRef.current, {
-      iframeStyle: {
-        width: "100%",
-        height: "100%",
-        border: "0",
-        backgroundColor: "#111827",
-      },
-      showLeaveButton: true,
-      userName: displayName,
-    });
+    let callFrame: any = null;
 
-    frameRef.current = callFrame;
-
-    const roomUrl = `https://summeet.daily.co/${roomName}`;
-
-    // 2. Join the call
-    callFrame
-      .join({ url: roomUrl, token })
-      .then(() => {
-        console.log("✅ Successfully joined Daily room");
-      })
-      .catch((err) => {
-        console.error("Daily join error details:", JSON.stringify(err, null, 2));
-        callFrame.destroy();
-        frameRef.current = null;
+    try {
+      callFrame = DailyIframe.createFrame(containerRef.current, {
+        iframeStyle: {
+          width: "100%",
+          height: "100%",
+          border: "0",
+          backgroundColor: "#111827",
+        },
+        showLeaveButton: true,
+        userName: displayName,
       });
 
-    // 3. Events
-    callFrame.on("joined-meeting", () => setIsLoading(false));
-    callFrame.on("left-meeting", () => onClose?.());
-    callFrame.on("error", (e) => console.error("Daily SDK Error details:", JSON.stringify(e, null, 2)));
+      frameRef.current = callFrame;
+
+      const roomUrl = `https://summeet.daily.co/${roomName}`;
+
+      // 2. Join the call
+      callFrame
+        .join({ url: roomUrl, token })
+        .then(() => {
+          console.log("✅ Successfully joined Daily room");
+        })
+        .catch((err: any) => {
+          console.error("Daily join error details:", JSON.stringify(err, null, 2));
+          if (callFrame) {
+            callFrame.destroy();
+          }
+          frameRef.current = null;
+        });
+
+      // 3. Events
+      callFrame.on("joined-meeting", () => setIsLoading(false));
+      callFrame.on("left-meeting", () => onClose?.());
+      callFrame.on("error", (e: any) => console.error("Daily SDK Error details:", JSON.stringify(e, null, 2)));
+    } catch (err) {
+      console.error("Error creating Daily frame:", err);
+      isInitializing.current = false;
+      frameRef.current = null;
+      return;
+    }
 
     // 4. CRITICAL CLEANUP: This prevents the "Duplicate Instance" error
     return () => {
+      console.log("🧹 Cleaning up Daily frame...");
       if (frameRef.current) {
-        console.log("🧹 Destroying Daily instance...");
-        frameRef.current.destroy();
+        try {
+          frameRef.current.destroy();
+        } catch (err) {
+          console.error("Error destroying frame:", err);
+        }
         frameRef.current = null;
-        isInitializing.current = false;
       }
+      isInitializing.current = false;
     };
-  }, [roomName, token, displayName, onClose]);
+  }, [token, roomName]);
 
   const isMobile = () => {
     if (typeof window === "undefined") return false;
