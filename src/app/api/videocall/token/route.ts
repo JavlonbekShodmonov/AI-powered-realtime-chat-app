@@ -69,14 +69,17 @@ export async function POST(request: Request) {
     if (!roomRes.ok) {
       console.error("⚠️ Room creation response:", JSON.stringify(roomData));
       
-      // Check if room already exists (different API versions have different error formats)
+      // Check if room already exists - look in both error and info fields
       const errorMsg = (roomData.error || "").toLowerCase();
+      const infoMsg = (roomData.info || "").toLowerCase();
       const isAlreadyExists = 
         errorMsg.includes("already") || 
         errorMsg.includes("exists") ||
+        infoMsg.includes("already") ||
+        infoMsg.includes("exists") ||
         roomData.error === "already-exists";
       
-      if (!isAlreadyExists && roomRes.status !== 403 && roomRes.status !== 409) {
+      if (!isAlreadyExists && roomRes.status !== 400 && roomRes.status !== 403 && roomRes.status !== 409) {
         console.error("❌ Cannot create room. Status:", roomRes.status);
         throw new Error(`Daily API error: ${roomData.error || "Unknown error"}`);
       }
@@ -89,9 +92,11 @@ export async function POST(request: Request) {
     console.log("🔐 Generating meeting token...");
     
     const tokenPayload = {
-      room_name: sanitizedRoomName,
-      is_owner: true,
-      exp: Math.floor(Date.now() / 1000) + 1800, // 30 min safety
+      properties: {
+        room_name: sanitizedRoomName,
+        is_owner: true,
+        exp: Math.floor(Date.now() / 1000) + 1800, // 30 min safety
+      },
     };
     
     console.log("🔐 Token request payload:", JSON.stringify(tokenPayload));

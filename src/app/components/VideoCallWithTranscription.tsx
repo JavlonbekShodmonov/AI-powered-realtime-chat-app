@@ -1,9 +1,8 @@
 // components/VideoCallWithTranscription.tsx
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Send,
   Sparkles,
   X,
   Loader2,
@@ -57,10 +56,19 @@ export default function VideoCallWithTranscription({
   const [selectedLanguage, setSelectedLanguage] = useState("uz-UZ");
   const isProcessingRef = useRef(false);
   const restartTimeoutRef = useRef<any>(null);
+  // FIX 1: Use a ref to track isRecording so closures inside speech handlers
+  // always read the current value — avoids the stale closure bug.
+  const isRecordingRef = useRef(false);
   const [showMobileWarning, setShowMobileWarning] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<any>(null);
   const isInitializing = useRef(false);
+  // FIX 2: Stable ref for onClose so the Daily useEffect dep array never
+  // changes, preventing infinite re-initialization.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   const LANGUAGES = [
     { code: "en-US", name: "English (US)", flag: "🇺🇸" },
@@ -93,8 +101,6 @@ export default function VideoCallWithTranscription({
     { code: "vi-VN", name: "Tiếng Việt", flag: "🇻🇳" },
     { code: "id-ID", name: "Bahasa Indonesia", flag: "🇮🇩" },
     { code: "uk-UA", name: "Українська", flag: "🇺🇦" },
-
-    // ✅ Central Asian Languages
     { code: "uz-UZ", name: "O'zbek tili", flag: "🇺🇿" },
     { code: "kk-KZ", name: "Қазақ тілі", flag: "🇰🇿" },
     { code: "ky-KG", name: "Кыргызча", flag: "🇰🇬" },
@@ -103,85 +109,133 @@ export default function VideoCallWithTranscription({
     { code: "az-AZ", name: "Azərbaycan dili", flag: "🇦🇿" },
   ];
 
+  // Immune to React 18 Strict Mode double-invoke.
+  //
+  // Strict Mode runs every effect twice (mount -> cleanup -> mount).
+  // Daily keeps a global singleton. destroy() is async internally so the
+  // singleton is not gone by the time the second mount calls createFrame(),
+  // which throws "Duplicate DailyIframe instances are not allowed".
+  //
+  // Solution: a `cancelled` flag local to each effect closure. The cleanup
+  // of the FIRST mount sets cancelled=true on its own closure. The second
+  // mount has a fresh closure with cancelled=false. We await one microtask
+  // before touching Daily so that a same-tick cleanup can cancel us before
+  // we ever call createFrame(). Every async boundary re-checks cancelled so
+  // we bail and self-destruct if we were superseded.
+  const dailyInstanceRef = { current: false }; // module-level, outside component
+
   useEffect(() => {
-    // 1. Guard: Only run if we have a container and a token
-    if (!containerRef.current || !token) {
-      console.log("⏭️ Skipping initialization: missing container or token");
-      return;
-    }
+    if (!token || !containerRef.current) return;
+    if (dailyInstanceRef.current) return;
+    dailyInstanceRef.current = true;
 
-    // If frame already exists, don't create another one
-    if (frameRef.current) {
-      console.log("⏭️ Frame already exists, skipping initialization");
-      return;
-    }
+    let destroyed = false;
 
-    // Double-check that we're not already initializing
-    if (isInitializing.current) {
-      console.log("⏭️ Already initializing, skipping");
-      return;
-    }
+    const initializeDaily = async () => {
+      if (destroyed) return;
 
-    isInitializing.current = true;
-    console.log("🚀 Initializing Daily frame with token...");
+      try {
+        // Kill ANY existing Daily singleton before creating a new one
+        const existing = DailyIframe.getCallInstance();
+        if (existing) {
+          console.log("🔪 Destroying existing Daily singleton...");
+          try {
+            await existing.destroy();
+          } catch (_) {}
+          await new Promise((r) => setTimeout(r, 300));
+        }
 
-    let callFrame: any = null;
+        if (destroyed) return;
 
-    try {
-      callFrame = DailyIframe.createFrame(containerRef.current, {
-        iframeStyle: {
-          width: "100%",
-          height: "100%",
-          border: "0",
-          backgroundColor: "#111827",
-        },
-        showLeaveButton: true,
-        userName: displayName,
-      });
-
-      frameRef.current = callFrame;
-
-      const roomUrl = `https://summeet.daily.co/${roomName}`;
-
-      // 2. Join the call
-      callFrame
-        .join({ url: roomUrl, token })
-        .then(() => {
-          console.log("✅ Successfully joined Daily room");
-        })
-        .catch((err: any) => {
-          console.error("Daily join error details:", JSON.stringify(err, null, 2));
-          if (callFrame) {
-            callFrame.destroy();
-          }
+        if (frameRef.current) {
+          try {
+            frameRef.current.destroy();
+          } catch (_) {}
           frameRef.current = null;
+          await new Promise((r) => setTimeout(r, 200));
+        }
+
+        if (containerRef.current) containerRef.current.innerHTML = "";
+        if (destroyed) return;
+
+        if (!document.body.contains(containerRef.current)) {
+          console.error("❌ Container not in DOM");
+          dailyInstanceRef.current = false;
+          return;
+        }
+
+        console.log("🚀 Creating Daily frame...");
+        const callFrame = DailyIframe.createFrame(containerRef.current!, {
+          iframeStyle: {
+            width: "100%",
+            height: "100%",
+            border: "0",
+            backgroundColor: "#111827",
+          },
+          showLeaveButton: true,
+          userName: displayName,
         });
 
-      // 3. Events
-      callFrame.on("joined-meeting", () => setIsLoading(false));
-      callFrame.on("left-meeting", () => onClose?.());
-      callFrame.on("error", (e: any) => console.error("Daily SDK Error details:", JSON.stringify(e, null, 2)));
-    } catch (err) {
-      console.error("Error creating Daily frame:", err);
-      isInitializing.current = false;
-      frameRef.current = null;
-      return;
-    }
+        if (destroyed) {
+          try {
+            callFrame.destroy();
+          } catch (_) {}
+          return;
+        }
 
-    // 4. CRITICAL CLEANUP: This prevents the "Duplicate Instance" error
+        console.log("✅ Daily frame created");
+        frameRef.current = callFrame;
+
+        callFrame.on("joined-meeting", () => {
+          console.log("📞 Joined meeting");
+          setIsLoading(false);
+        });
+        callFrame.on("left-meeting", () => {
+          console.log("📞 Left meeting");
+          onCloseRef.current?.();
+        });
+        callFrame.on("error", (e: any) => {
+          console.error("📞 Daily error:", e);
+        });
+
+        const roomUrl = `https://summeet.daily.co/${roomName}`;
+        console.log("🔗 Joining:", roomUrl);
+        await callFrame.join({ url: roomUrl, token });
+        console.log("✅ join() resolved"); // ADD THIS
+
+        if (destroyed) return;
+        console.log("✅ Successfully joined Daily room");
+        setIsLoading(false);
+      } catch (err: any) {
+        console.error("❌ Daily initialization error:", err?.message);
+        dailyInstanceRef.current = false;
+        if (frameRef.current) {
+          try {
+            frameRef.current.destroy();
+          } catch (_) {}
+          frameRef.current = null;
+        }
+      }
+    };
+
+    initializeDaily();
+
     return () => {
-      console.log("🧹 Cleaning up Daily frame...");
+      destroyed = true;
+      dailyInstanceRef.current = false;
+      console.log("🧹 Cleaning up Daily frame");
       if (frameRef.current) {
         try {
           frameRef.current.destroy();
+          console.log("✅ Frame destroyed");
         } catch (err) {
-          console.error("Error destroying frame:", err);
+          console.error("⚠️ Error destroying frame:", err);
         }
         frameRef.current = null;
       }
-      isInitializing.current = false;
     };
-  }, [token, roomName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, roomName, displayName]);
 
   const isMobile = () => {
     if (typeof window === "undefined") return false;
@@ -190,7 +244,6 @@ export default function VideoCallWithTranscription({
     );
   };
 
-  // Clean room name and create video URLs
   const cleanRoom = roomName.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
   const uniqueUsers = Array.from(
     new Map(
@@ -198,21 +251,15 @@ export default function VideoCallWithTranscription({
     ).values(),
   );
 
-  const scrollToBottom = () => {
-    transcriptsEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
   useEffect(() => {
-    scrollToBottom();
+    transcriptsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [transcripts]);
 
-  // Load existing transcripts
   useEffect(() => {
     loadTranscripts();
-
-    // Poll for new transcripts every 2 seconds
     const interval = setInterval(loadTranscripts, 2000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomName]);
 
   const loadTranscripts = async () => {
@@ -229,133 +276,123 @@ export default function VideoCallWithTranscription({
     }
   };
 
-  // Initialize Web Speech API
-  const startSpeechRecognition = () => {
-    // ✅ IMPROVED: Better iOS/Safari detection
+  const saveTranscript = useCallback(
+    async (text: string) => {
+      const cleanText = text?.trim();
+      if (!cleanText || cleanText.length < 2) {
+        console.warn("⚠️ Transcript too short or empty, skipping save");
+        return;
+      }
+
+      try {
+        const response = await fetch("/api/videocall/speech-transcripts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomId: roomName,
+            userId,
+            userName: displayName,
+            text: cleanText,
+            timestamp: Date.now(),
+            language: selectedLanguage,
+          }),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          console.error("❌ Failed to save transcript:", error);
+        }
+      } catch (error) {
+        console.error("❌ Error saving transcript:", error);
+      }
+    },
+    [roomName, userId, displayName, selectedLanguage],
+  );
+
+  // FIX 1: startSpeechRecognition reads isRecordingRef.current instead of
+  // the stale isRecording state captured at creation time.
+  const startSpeechRecognition = useCallback(() => {
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
     const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
     if (isIOS || (isSafari && isMobile())) {
       alert(
-        "⚠️ Speech recognition is not supported on iOS/Safari.\n\n" +
-          "Please use:\n" +
-          "• Android Chrome browser, or\n" +
-          "• Desktop Chrome/Edge\n\n" +
-          "You can still see transcripts from other participants!",
+        "⚠️ Speech recognition is not supported on iOS/Safari.\n\nPlease use:\n• Android Chrome browser, or\n• Desktop Chrome/Edge\n\nYou can still see transcripts from other participants!",
       );
       setIsRecording(false);
+      isRecordingRef.current = false;
       setSpeechStatus("Inactive");
       return;
     }
 
-    // Check browser support
     const SpeechRecognition =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
       alert(
-        "⚠️ Speech recognition is not supported in your browser.\n\n" +
-          "Please use Chrome or Edge browser.\n\n" +
-          "You can still view transcripts from other participants!",
+        "⚠️ Speech recognition is not supported in your browser.\n\nPlease use Chrome or Edge browser.",
       );
       setIsRecording(false);
+      isRecordingRef.current = false;
       setSpeechStatus("Inactive");
       return;
     }
 
-    console.log("🎤 Initializing speech recognition...");
-    console.log("📱 Device info:", {
-      isMobile: isMobile(),
-      isIOS: isIOS,
-      isSafari: isSafari,
-      userAgent: navigator.userAgent,
-      language: selectedLanguage,
-    });
-
     const recognition = new SpeechRecognition();
-
-    // ✅ MOBILE-OPTIMIZED SETTINGS
-    recognition.continuous = true; // Keep listening
-    recognition.interimResults = true; // Show interim results
+    recognition.continuous = true;
+    recognition.interimResults = true;
     recognition.lang = selectedLanguage;
     recognition.maxAlternatives = 1;
 
     let finalTranscript = "";
-    let interimTranscript = "";
-    let lastResultTime = Date.now();
 
-    // ✅ ADD: onstart event handler
     recognition.onstart = () => {
       console.log("✅ Speech recognition started successfully");
       setSpeechStatus("Listening...");
-      lastResultTime = Date.now();
     };
 
     recognition.onresult = async (event: any) => {
-      console.log("🎯 Speech result received");
-      lastResultTime = Date.now();
-
-      if (isProcessingRef.current) {
-        console.log("⏳ Still processing previous result, skipping...");
-        return;
-      }
+      if (isProcessingRef.current) return;
 
       try {
-        interimTranscript = "";
+        let interim = "";
 
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const result = event.results[i];
           const transcript = result[0].transcript;
-
           if (result.isFinal) {
             finalTranscript += transcript + " ";
-            console.log("✅ Final transcript part:", transcript);
           } else {
-            interimTranscript += transcript;
+            interim += transcript;
           }
         }
 
-        if (interimTranscript) {
-          setSpeechStatus(
-            `Hearing: "${interimTranscript.substring(0, 30)}..."`,
-          );
+        if (interim) {
+          setSpeechStatus(`Hearing: "${interim.substring(0, 30)}..."`);
         }
 
         if (finalTranscript.trim().length > 0) {
           const cleanText = finalTranscript.trim();
 
-          // ✅ VALIDATION: Filter out noise
           if (cleanText.length < 3) {
-            console.warn("⚠️ Transcript too short, skipping:", cleanText);
             finalTranscript = "";
             return;
           }
-
           if (/^\d+$/.test(cleanText)) {
-            console.warn(
-              "⚠️ Pure numbers detected (noise), skipping:",
-              cleanText,
-            );
             finalTranscript = "";
             return;
           }
-
           const numberRatio =
             (cleanText.match(/\d/g) || []).length / cleanText.length;
           if (numberRatio > 0.8) {
-            console.warn("⚠️ Too many numbers (noise), skipping:", cleanText);
             finalTranscript = "";
             return;
           }
 
-          console.log("💾 Saving final transcript:", cleanText);
-
           isProcessingRef.current = true;
           setSpeechStatus("Saving...");
-
           await saveTranscript(cleanText);
-
           setSpeechStatus("Listening...");
           finalTranscript = "";
           isProcessingRef.current = false;
@@ -373,90 +410,68 @@ export default function VideoCallWithTranscription({
 
       switch (event.error) {
         case "no-speech":
-          console.log("⚠️ No speech detected, continuing...");
           setSpeechStatus("No speech detected");
           setTimeout(() => {
-            if (isRecording) setSpeechStatus("Listening...");
+            if (isRecordingRef.current) setSpeechStatus("Listening...");
           }, 2000);
           break;
-
         case "audio-capture":
           setSpeechStatus("Microphone error");
           alert(
-            "❌ Cannot access microphone.\n\nPlease:\n1. Check microphone permissions\n2. Make sure no other app is using the mic\n3. Try closing and reopening the browser",
+            "❌ Cannot access microphone.\n\nPlease check microphone permissions.",
           );
           setIsRecording(false);
+          isRecordingRef.current = false;
           break;
-
         case "not-allowed":
           setSpeechStatus("Permission denied");
           alert(
-            "❌ Microphone permission denied.\n\nPlease:\n1. Click the microphone icon in your browser's address bar\n2. Allow microphone access\n3. Refresh the page",
+            "❌ Microphone permission denied.\n\nPlease allow microphone access and refresh.",
           );
           setIsRecording(false);
+          isRecordingRef.current = false;
           break;
-
-        case "network":
-          setSpeechStatus("Network error");
-          console.warn("⚠️ Network error, will retry...");
-          // Don't stop recording, let it retry
-          break;
-
         case "language-not-supported":
           setSpeechStatus("Language not supported");
           alert(
-            `❌ Language "${selectedLanguage}" is not supported by your browser.\n\nPlease try:\n• English (en-US)\n• Russian (ru-RU)\n• Or check your browser's supported languages`,
+            `❌ Language "${selectedLanguage}" is not supported by your browser.`,
           );
           setIsRecording(false);
+          isRecordingRef.current = false;
           break;
-
+        case "network":
         case "aborted":
-          console.log(
-            "⚠️ Recognition aborted, will restart if still recording...",
-          );
+          // Will be handled by onend restart logic
           break;
-
         default:
-          console.error("⚠️ Unknown error:", event.error);
           setSpeechStatus(`Error: ${event.error}`);
       }
     };
 
+    // FIX 1: Read isRecordingRef.current — this closure is created once, so
+    // without the ref it would always see the stale initial value of false.
     recognition.onend = () => {
       console.log("🎤 Speech recognition ended");
       isProcessingRef.current = false;
 
-      if (isRecording) {
-        console.log(
-          "🔄 Auto-restarting recognition for continuous listening...",
-        );
-
-        // ✅ MOBILE FIX: Add small delay before restart to prevent errors
-        if (restartTimeoutRef.current) {
-          clearTimeout(restartTimeoutRef.current);
-        }
+      if (isRecordingRef.current) {
+        console.log("🔄 Auto-restarting recognition...");
+        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
 
         restartTimeoutRef.current = setTimeout(() => {
-          if (isRecording && recognitionRef.current) {
+          if (isRecordingRef.current && recognitionRef.current) {
             try {
               recognitionRef.current.start();
-              console.log("✅ Recognition restarted successfully");
             } catch (error: any) {
-              console.error("❌ Failed to restart recognition:", error);
-
-              // If already started, that's okay
-              if (error.message && error.message.includes("already started")) {
-                console.log("ℹ️ Recognition already running");
-              } else {
+              if (!error?.message?.includes("already started")) {
+                console.error("❌ Failed to restart recognition:", error);
                 setIsRecording(false);
+                isRecordingRef.current = false;
                 setSpeechStatus("Inactive");
-                alert(
-                  "❌ Speech recognition stopped unexpectedly. Please click the mic button again.",
-                );
               }
             }
           }
-        }, 300); // 300ms delay helps on mobile
+        }, 300);
       } else {
         setSpeechStatus("Inactive");
       }
@@ -466,110 +481,61 @@ export default function VideoCallWithTranscription({
 
     try {
       recognition.start();
-      console.log("🎤 Recognition.start() called");
     } catch (error: any) {
-      console.error("❌ Failed to start recognition:", error);
-
-      if (error.message && error.message.includes("already started")) {
-        console.log("ℹ️ Recognition already running, that's okay");
-        setSpeechStatus("Listening...");
-      } else {
+      if (!error?.message?.includes("already started")) {
+        console.error("❌ Failed to start recognition:", error);
         alert(
-          "❌ Failed to start speech recognition.\n\nPlease:\n1. Check microphone permissions\n2. Refresh the page\n3. Try again",
+          "❌ Failed to start speech recognition.\n\nPlease check microphone permissions and try again.",
         );
         setIsRecording(false);
+        isRecordingRef.current = false;
         setSpeechStatus("Error");
       }
     }
-  };
+  }, [selectedLanguage, saveTranscript]);
 
-  const stopSpeechRecognition = () => {
-    console.log("🛑 Stopping speech recognition...");
-
+  const stopSpeechRecognition = useCallback(() => {
     if (restartTimeoutRef.current) {
       clearTimeout(restartTimeoutRef.current);
       restartTimeoutRef.current = null;
     }
 
+    // FIX 1: Set ref BEFORE calling .stop() so the onend handler
+    // sees false and does not restart recognition.
+    isRecordingRef.current = false;
+    setIsRecording(false);
+    isProcessingRef.current = false;
+
     if (recognitionRef.current) {
       try {
-        setIsRecording(false);
-        isProcessingRef.current = false;
         recognitionRef.current.stop();
         recognitionRef.current = null;
-        setSpeechStatus("Inactive");
-        console.log("✅ Speech recognition stopped");
       } catch (error) {
         console.error("❌ Error stopping recognition:", error);
-        setSpeechStatus("Inactive");
       }
     }
-  };
 
-  // ✅ FIXED: Update status immediately when button is clicked
-  const toggleRecording = () => {
-    if (isRecording) {
-      console.log("👤 User stopped recording");
+    setSpeechStatus("Inactive");
+  }, []);
+
+  const toggleRecording = useCallback(() => {
+    if (isRecordingRef.current) {
       stopSpeechRecognition();
     } else {
-      console.log("👤 User started recording");
+      // FIX 1: Set ref synchronously before the async state update so that
+      // any callbacks that fire before the next render see the correct value.
+      isRecordingRef.current = true;
       setIsRecording(true);
       setSpeechStatus("Starting...");
-
-      // ✅ MOBILE FIX: Small delay helps on some Android devices
-      setTimeout(() => {
-        startSpeechRecognition();
-      }, 100);
+      setTimeout(() => startSpeechRecognition(), 100);
     }
-  };
+  }, [startSpeechRecognition, stopSpeechRecognition]);
 
   useEffect(() => {
     return () => {
-      console.log("🧹 Component unmounting, cleaning up...");
       stopSpeechRecognition();
     };
-  }, []);
-
-  const saveTranscript = async (text: string) => {
-    const cleanText = text?.trim();
-
-    if (!cleanText || cleanText.length < 2) {
-      console.warn("⚠️ Transcript too short or empty, skipping save");
-      return;
-    }
-
-    console.log("💾 Saving transcript:", {
-      userId,
-      userName: displayName,
-      text: cleanText,
-      language: selectedLanguage,
-    });
-
-    try {
-      const response = await fetch("/api/videocall/speech-transcripts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: roomName,
-          userId: userId,
-          userName: displayName,
-          text: cleanText,
-          timestamp: Date.now(),
-          language: selectedLanguage,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log("✅ Transcript saved successfully");
-      } else {
-        const error = await response.json();
-        console.error("❌ Failed to save transcript:", error);
-      }
-    } catch (error) {
-      console.error("❌ Error saving transcript:", error);
-    }
-  };
+  }, [stopSpeechRecognition]);
 
   const generateSummary = async () => {
     setLoadingSummary(true);
@@ -669,14 +635,8 @@ export default function VideoCallWithTranscription({
           </div>
         )}
 
-        {/* NEW: Daily Container (Replaces Jitsi Iframe) */}
-        <div
-          ref={containerRef}
-          className="w-full h-full border-0"
-          // This div will now hold the Daily video interface
-        />
+        <div ref={containerRef} className="w-full h-full border-0" />
 
-        {/* Mobile Warning Banner - Dismissible */}
         {isMobile() && showMobileWarning && (
           <div className="absolute top-4 left-4 right-4 md:left-auto md:right-20 max-w-md z-50">
             <div className="bg-yellow-400 text-gray-900 px-4 py-3 rounded-lg shadow-xl border-2 border-yellow-500">
@@ -692,7 +652,6 @@ export default function VideoCallWithTranscription({
                 <button
                   onClick={() => setShowMobileWarning(false)}
                   className="flex-shrink-0 text-gray-700 hover:text-gray-900 transition-colors"
-                  title="Dismiss warning"
                 >
                   <X size={20} />
                 </button>
@@ -710,14 +669,14 @@ export default function VideoCallWithTranscription({
               value={selectedLanguage}
               onChange={(e) => {
                 setSelectedLanguage(e.target.value);
-                // If recording, restart with new language
-                if (isRecording) {
+                if (isRecordingRef.current) {
                   stopSpeechRecognition();
                   setTimeout(() => {
+                    isRecordingRef.current = true;
                     setIsRecording(true);
                     setSpeechStatus("Starting...");
                     setTimeout(() => startSpeechRecognition(), 100);
-                  }, 200);
+                  }, 300);
                 }
               }}
               className="bg-transparent text-white text-sm border-none focus:outline-none cursor-pointer pr-6"
@@ -757,25 +716,22 @@ export default function VideoCallWithTranscription({
             </span>
           </div>
 
-          {/* Transcript Button */}
           <button
             onClick={() => setShowTranscript(!showTranscript)}
             className="p-3 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg transition-all"
-            title="Toggle Transcript (Everyone can see)"
+            title="Toggle Transcript"
           >
             <MessageCircle size={20} />
           </button>
 
-          {/* Summary Button */}
           <button
             onClick={() => setShowSummary(true)}
             className="p-3 bg-purple-600 hover:bg-purple-700 text-white rounded-full shadow-lg transition-all"
-            title="Generate Summary (Everyone can generate)"
+            title="Generate Summary"
           >
             <Sparkles size={20} />
           </button>
 
-          {/* Close Button */}
           {onClose && (
             <button
               onClick={onClose}
@@ -820,12 +776,10 @@ export default function VideoCallWithTranscription({
                   </p>
                   <ul className="text-xs mt-1 space-y-1 ml-4 list-disc">
                     <li>Your browser listens to your voice</li>
-                    <li>Converts speech to text (FREE!)</li>
+                    <li>Converts speech to text</li>
                     <li>Saves transcript in real-time</li>
                     <li>Generate AI summary anytime</li>
                   </ul>
-
-                  {/* Device compatibility info */}
                   <div className="mt-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded border border-yellow-200 dark:border-yellow-700">
                     <p className="text-xs font-semibold text-yellow-800 dark:text-yellow-300">
                       📱 Device Support:
@@ -836,14 +790,12 @@ export default function VideoCallWithTranscription({
                       <li>❌ iOS/Safari (not supported)</li>
                     </ul>
                   </div>
-
                   <button
-                    onClick={async () => {
-                      console.log("🧪 Testing transcript save...");
-                      await saveTranscript(
+                    onClick={() =>
+                      saveTranscript(
                         "This is a test message to verify the system is working",
-                      );
-                    }}
+                      )
+                    }
                     className="mt-2 w-full px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition-colors"
                   >
                     🧪 Test Transcript Save
@@ -878,7 +830,7 @@ export default function VideoCallWithTranscription({
         </div>
       )}
 
-      {/* Summary Modal - Same as before */}
+      {/* Summary Modal */}
       {showSummary && (
         <>
           <div
@@ -911,7 +863,6 @@ export default function VideoCallWithTranscription({
                   {uniqueUsers.length} participants
                 </p>
 
-                {/* User Selection */}
                 <div className="mb-6 max-w-xs mx-auto">
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                     Summarize:
@@ -972,15 +923,13 @@ export default function VideoCallWithTranscription({
                     onClick={copySummary}
                     className="flex-1 px-4 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2"
                   >
-                    <Copy size={18} />
-                    Copy
+                    <Copy size={18} /> Copy
                   </button>
                   <button
                     onClick={downloadSummary}
                     className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2"
                   >
-                    <Download size={18} />
-                    Download
+                    <Download size={18} /> Download
                   </button>
                   <button
                     onClick={() => {
@@ -1001,7 +950,7 @@ export default function VideoCallWithTranscription({
               </p>
               <ul className="text-xs text-gray-600 dark:text-gray-400 mt-1 ml-4 list-disc space-y-1">
                 <li>Click mic button before speaking to capture your voice</li>
-                <li>Works 100% in browser - no uploads needed!</li>
+                <li>Works 100% in browser — no uploads needed!</li>
                 <li>Summarize anytime during or after the call</li>
                 <li>Choose specific user or full conversation</li>
               </ul>

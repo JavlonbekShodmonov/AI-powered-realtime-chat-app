@@ -1,16 +1,20 @@
 // components/VideoChatButton.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import {
   Video,
   X,
   ExternalLink,
   Sparkles,
   MessageCircle,
-  Users,
 } from "lucide-react";
-import VideoCallWithTranscription from "./VideoCallWithTranscription";
+import dynamic from "next/dynamic";
+
+const VideoCallWithTranscription = dynamic(
+  () => import("./VideoCallWithTranscription"),
+  { ssr: false }
+);
 
 interface VideoCallButtonProps {
   meetingId: string;
@@ -47,29 +51,57 @@ export default function VideoChatButton({
   const [showOptions, setShowOptions] = useState(false);
   const [showEmbeddedCall, setShowEmbeddedCall] = useState(false);
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
+  // THE FIX: track the token so we can pass it to VideoCallWithTranscription
+  const [callToken, setCallToken] = useState<string | null>(null);
+  const [isFetchingToken, setIsFetchingToken] = useState(false);
+  console.log("VideoChatButton state:", { showEmbeddedCall, callToken, showOptions });
 
   const cleanMeetingId = meetingId.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
 
   const jitsiUrl = `https://8x8.vc/${process.env.NEXT_PUBLIC_JAAS_APP_ID}/${cleanMeetingId}#config.prejoinPageEnabled=false&config.startWithAudioMuted=false&config.startWithVideoMuted=false&userInfo.displayName="${encodeURIComponent(userName)}"`;
-  const handleCallStart = async () => {
-    const startTime = Date.now();
+
+  const handleCallStart = (startTime: number) => {
     setCallStartTime(startTime);
+    onCallStart?.({ meetingId: cleanMeetingId, callerName: userName, timestamp: startTime });
+    onSendMessage?.(`📞 ${userName} started a video call with AI features`);
+  };
 
-    if (onCallStart) {
-      onCallStart({
-        meetingId: cleanMeetingId,
-        callerName: userName,
-        timestamp: startTime,
+  // THE FIX: fetch the Daily token before mounting VideoCallWithTranscription
+  const startCallEmbedded = async () => {
+    setShowOptions(false);
+    setIsFetchingToken(true);
+
+    try {
+      const res = await fetch("/api/videocall/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomName: cleanMeetingId }),
       });
-    }
 
-    if (onSendMessage) {
-      onSendMessage(`📞 ${userName} started a video call with AI features`);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "Failed to get token");
+      }
+
+      const data = await res.json();
+      if (!data.token || typeof data.token !== "string") {
+        throw new Error("Invalid token received");
+      }
+
+      const startTime = Date.now();
+      setCallToken(data.token);
+      setShowEmbeddedCall(true);
+      handleCallStart(startTime);
+    } catch (error) {
+      console.error("❌ Failed to start call:", error);
+      alert(`Failed to start call: ${error instanceof Error ? error.message : "Unknown error"}`);
+    } finally {
+      setIsFetchingToken(false);
     }
   };
 
   const startCallNewWindow = async () => {
-    await handleCallStart();
+    handleCallStart(Date.now());
     const callWindow = window.open(
       jitsiUrl,
       "VideoCall",
@@ -86,42 +118,27 @@ export default function VideoChatButton({
     setShowOptions(false);
   };
 
-  const startCallSameWindow = async () => {
-    await handleCallStart();
+  const startCallSameWindow = () => {
+    handleCallStart(Date.now());
     window.location.href = jitsiUrl;
-  };
-  const startCallEmbedded = () => {
-    handleCallStart();
-    setShowEmbeddedCall(true);
-    setShowOptions(false);
   };
 
   const handleCallEnd = () => {
     if (callStartTime) {
       const duration = Math.floor((Date.now() - callStartTime) / 1000);
-
-      if (onCallEnd) {
-        onCallEnd({
-          meetingId: cleanMeetingId,
-          callerName: userName,
-          duration,
-          timestamp: Date.now(),
-        });
-      }
+      onCallEnd?.({ meetingId: cleanMeetingId, callerName: userName, duration, timestamp: Date.now() });
 
       if (onSendMessage) {
         const minutes = Math.floor(duration / 60);
         const seconds = duration % 60;
-        const durationText =
-          minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-        onSendMessage(
-          `📞 ${userName} left the call • Duration: ${durationText}`,
-        );
+        const durationText = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+        onSendMessage(`📞 ${userName} left the call • Duration: ${durationText}`);
       }
 
       setCallStartTime(null);
-      setShowEmbeddedCall(false);
     }
+    setShowEmbeddedCall(false);
+    setCallToken(null);
   };
 
   const copyLink = () => {
@@ -130,15 +147,16 @@ export default function VideoChatButton({
     setShowOptions(false);
   };
 
-  // Embedded Video Call with Speech-to-Text & Summary
-  if (showEmbeddedCall) {
+  // Embedded Video Call — now passes token
+  if (showEmbeddedCall && callToken) {
     return (
       <div className="fixed inset-0 z-50 bg-gray-900">
         <VideoCallWithTranscription
-          roomName={meetingId}
+          roomName={cleanMeetingId}
           displayName={userName}
           userId={userId}
           onClose={handleCallEnd}
+          token={callToken}
         />
       </div>
     );
@@ -152,7 +170,6 @@ export default function VideoChatButton({
           className="fixed inset-0 bg-black bg-opacity-50 z-40"
           onClick={() => setShowOptions(false)}
         />
-
         <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-white dark:bg-gray-800 rounded-lg shadow-2xl p-6 w-96 max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
@@ -167,19 +184,19 @@ export default function VideoChatButton({
           </div>
 
           <div className="space-y-3">
-            {/* Primary option: Start with AI features */}
             <button
               onClick={startCallEmbedded}
-              className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg transition-colors"
+              disabled={isFetchingToken}
+              className="w-full flex items-center gap-3 px-4 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <div className="p-2 bg-white/20 rounded">
                 <MessageCircle size={20} />
               </div>
               <div className="text-left flex-1">
-                <div className="font-medium">Start Call with AI Features</div>
-                <div className="text-xs opacity-90">
-                  Speech-to-text + Summary (FREE!)
+                <div className="font-medium">
+                  {isFetchingToken ? "Connecting..." : "Start Call with AI Features"}
                 </div>
+                <div className="text-xs opacity-90">Speech-to-text + Summary (FREE!)</div>
               </div>
               <Sparkles size={16} className="opacity-75" />
             </button>
@@ -191,9 +208,7 @@ export default function VideoChatButton({
               <ExternalLink size={20} />
               <div className="text-left">
                 <div className="font-medium">Quick Call (New Window)</div>
-                <div className="text-xs opacity-90">
-                  Jitsi Meet - No AI features
-                </div>
+                <div className="text-xs opacity-90">Jitsi Meet - No AI features</div>
               </div>
             </button>
 
@@ -204,9 +219,7 @@ export default function VideoChatButton({
               <Video size={20} />
               <div className="text-left">
                 <div className="font-medium">Quick Call (Here)</div>
-                <div className="text-xs opacity-90">
-                  Jitsi Meet - Replace page
-                </div>
+                <div className="text-xs opacity-90">Jitsi Meet - Replace page</div>
               </div>
             </button>
 
@@ -238,11 +251,12 @@ export default function VideoChatButton({
     );
   }
 
-  // Icon variant (for chat header)
+  // Icon variant
   if (variant === "icon") {
     return (
       <button
         onClick={() => setShowOptions(true)}
+        disabled={isFetchingToken}
         className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative ${className}`}
         title="Start video call with AI transcription"
       >
@@ -255,10 +269,11 @@ export default function VideoChatButton({
   return (
     <button
       onClick={() => setShowOptions(true)}
+      disabled={isFetchingToken}
       className={`flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors ${className}`}
     >
       <Video size={20} />
-      <span>Start AI Video Call</span>
+      <span>{isFetchingToken ? "Connecting..." : "Start AI Video Call"}</span>
     </button>
   );
 }

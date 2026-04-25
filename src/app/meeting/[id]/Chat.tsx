@@ -10,8 +10,13 @@ import React from "react";
 import { useLocale } from "../../components/provider/locale-provider";
 import VideoChatButton from "../../components/VideoChatButton";
 import CallNotification from "../../components/CallNotification";
-import VideoCallWithTranscription from "@/app/components/VideoCallWithTranscription";
-import DailyIframe from "@daily-co/daily-js";
+import dynamic from "next/dynamic";
+
+const VideoCallWithTranscription = dynamic(
+  () => import("@/app/components/VideoCallWithTranscription"),
+  { ssr: false }
+);// FIX 3: Removed unused `DailyIframe` import — it caused a build error and
+// is not needed in this file (Daily is only used inside VideoCallWithTranscription).
 
 declare module "next-auth" {
   interface Session {
@@ -57,17 +62,21 @@ export default function Chat({ roomId }: ChatProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
   const [callToken, setCallToken] = useState<string | null>(null);
+  // FIX 4: Track which room name was used when the token was fetched, so we
+  // pass the exact same name to VideoCallWithTranscription (roomName prop).
+  const [activeCallRoomName, setActiveCallRoomName] = useState<string | null>(
+    null,
+  );
 
-  console.log("RENDER TYPES", {
-    messages: Array.isArray(messages),
-    onlineUsers: Array.isArray(onlineUsers),
+  console.log("Chat render state:", {
+    showEmbeddedCall,
+    callToken,
+    activeCallRoomName,
   });
-
   // Auto-scroll when messages update
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-
     const distanceFromBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight;
     if (distanceFromBottom < 100) {
@@ -75,19 +84,13 @@ export default function Chat({ roomId }: ChatProps) {
     }
   }, [messages]);
 
-  // ✅ Socket initialization (only once)
+  // Socket initialization (only once)
   useEffect(() => {
     if (status !== "authenticated" || !session?.user?.id) return;
-
-    // Only create socket once
-    if (socketRef.current?.connected) {
-      console.log("✅ Socket already exists and connected");
-      return;
-    }
+    if (socketRef.current?.connected) return;
 
     const base =
       process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
-
     const socket = io(base, {
       path: "/socket.io",
       transports: ["websocket"],
@@ -99,16 +102,10 @@ export default function Chat({ roomId }: ChatProps) {
 
     socketRef.current = socket;
 
-    socket.on("connect", () => {
-      console.log("🔌 Socket connected:", socket.id);
-    });
-
-    socket.on("disconnect", () => {
-      console.log("❌ Socket disconnected");
-    });
+    socket.on("connect", () => console.log("🔌 Socket connected:", socket.id));
+    socket.on("disconnect", () => console.log("❌ Socket disconnected"));
 
     return () => {
-      console.log("🧹 Disconnecting socket on unmount");
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;
@@ -116,107 +113,83 @@ export default function Chat({ roomId }: ChatProps) {
     };
   }, [status, session?.user?.id, session?.user?.name]);
 
-  // ✅ Room management (handles room changes)
+  // Room management
   useEffect(() => {
     const socket = socketRef.current;
     if (!socket || !session?.user?.id || !roomId) return;
 
-    console.log("🏠 Setting up room:", roomId);
-
-    // ✅ Leave previous room if switching rooms
     if (currentRoomRef.current && currentRoomRef.current !== roomId) {
-      console.log("👋 Leaving previous room:", currentRoomRef.current);
       socket.emit("leaveRoom", {
         roomId: currentRoomRef.current,
         userId: session.user.id,
       });
-
-      // ✅ Clear state when switching rooms
       setMessages([]);
       setOnlineUsers([]);
     }
 
     currentRoomRef.current = roomId;
-
-    // ✅ Join new room
-    console.log("📥 Joining room:", roomId);
     socket.emit("joinRoom", {
       roomId,
       userId: session.user.id,
       userName: session.user.name || "Anonymous",
     });
 
-    // ✅ Set up room-specific listeners
     const handleInitialMessages = (msgs: any) => {
       if (!Array.isArray(msgs)) {
-        console.error("❌ initialMessages is not an array:", msgs);
         setMessages([]);
         return;
       }
-
       setMessages(msgs);
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
-      }, 50);
+      setTimeout(
+        () => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }),
+        50,
+      );
     };
 
     const handleNewMessage = (message: any) => {
-      console.log("💬 New message:", message);
       const normalized = {
         ...message,
         _id: message._id?.toString?.() || String(message._id),
       };
       setMessages((prev) => {
         const prevArray = Array.isArray(prev) ? prev : [];
-        if (prevArray.some((m) => m._id === normalized._id)) {
-          return prevArray;
-        }
+        if (prevArray.some((m) => m._id === normalized._id)) return prevArray;
         return [...prevArray, normalized];
       });
     };
 
     const handleOnlineUsers = (list: any) => {
       if (!Array.isArray(list)) {
-        console.error("❌ onlineUsersWithNames is not an array:", list);
         setOnlineUsers([]);
         return;
       }
-      console.log("👥 Online users updated:", list);
       setOnlineUsers(list);
     };
 
     const handleMessageEdited = (updated: any) => {
       if (!updated || typeof updated !== "object") return;
-      console.log("✏️ Message edited:", updated);
-      setMessages((prev) => {
-        if (!Array.isArray(prev)) return [];
-        return prev.map((m) =>
-          m._id === updated._id ? { ...m, ...updated } : m,
-        );
-      });
+      setMessages((prev) =>
+        Array.isArray(prev)
+          ? prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m))
+          : [],
+      );
     };
 
     const handleMessageDeleted = (id: string) => {
-      console.log("🗑️ Message deleted:", id);
-      setMessages((prev) => {
-        const prevArray = Array.isArray(prev) ? prev : [];
-        return prevArray.filter((m) => m._id !== id && m.id !== id);
-      });
+      setMessages((prev) =>
+        Array.isArray(prev)
+          ? prev.filter((m) => m._id !== id && m.id !== id)
+          : [],
+      );
     };
 
-    const handleUserLeft = () => {
-      console.log("👋 User left the chat");
-      alert("The other user has left the chat");
-    };
+    const handleUserLeft = () => alert("The other user has left the chat");
 
-    // 🎥 VIDEO CALL LISTENERS
     const handleIncomingCall = (data: {
       callerName: string;
       callerId: string;
       meetingId: string;
     }) => {
-      console.log("📞 Incoming call:", data);
-      // Don't show notification if you're the caller
       if (data.callerId !== session.user.id) {
         setIncomingCall({
           callerName: data.callerName,
@@ -230,10 +203,8 @@ export default function Chat({ roomId }: ChatProps) {
       duration: number;
     }) => {
       console.log("📞 Call ended:", data);
-      // This message is already sent by the caller, so we just listen for it
     };
 
-    // ✅ Attach listeners
     socket.on("initialMessages", handleInitialMessages);
     socket.on("newMessage", handleNewMessage);
     socket.on("onlineUsersWithNames", handleOnlineUsers);
@@ -243,9 +214,7 @@ export default function Chat({ roomId }: ChatProps) {
     socket.on("incoming-call", handleIncomingCall);
     socket.on("call-ended", handleCallEnded);
 
-    // ✅ Cleanup listeners when room changes or component unmounts
     return () => {
-      console.log("🧹 Cleaning up room listeners for:", roomId);
       socket.off("initialMessages", handleInitialMessages);
       socket.off("newMessage", handleNewMessage);
       socket.off("onlineUsersWithNames", handleOnlineUsers);
@@ -255,9 +224,7 @@ export default function Chat({ roomId }: ChatProps) {
       socket.off("incoming-call", handleIncomingCall);
       socket.off("call-ended", handleCallEnded);
 
-      // Leave room on cleanup
       if (currentRoomRef.current === roomId) {
-        console.log("👋 Leaving room on cleanup:", roomId);
         socket.emit("leaveRoom", { roomId, userId: session.user.id });
         currentRoomRef.current = null;
       }
@@ -269,11 +236,8 @@ export default function Chat({ roomId }: ChatProps) {
     if (!isSummaryPanelOpen) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (!resizeRef.current) return;
       const newWidth = window.innerWidth - e.clientX;
-      if (newWidth >= 280 && newWidth <= 600) {
-        setSummaryPanelWidth(newWidth);
-      }
+      if (newWidth >= 280 && newWidth <= 600) setSummaryPanelWidth(newWidth);
     };
 
     const handleMouseUp = () => {
@@ -291,14 +255,12 @@ export default function Chat({ roomId }: ChatProps) {
     };
 
     const resizeHandle = resizeRef.current;
-    if (resizeHandle) {
+    if (resizeHandle)
       resizeHandle.addEventListener("mousedown", handleMouseDown);
-    }
 
     return () => {
-      if (resizeHandle) {
+      if (resizeHandle)
         resizeHandle.removeEventListener("mousedown", handleMouseDown);
-      }
       document.removeEventListener("mousemove", handleMouseMove);
       document.removeEventListener("mouseup", handleMouseUp);
     };
@@ -317,9 +279,6 @@ export default function Chat({ roomId }: ChatProps) {
 
   const handleSend = () => {
     if (!newMessage.trim() || !socketRef.current || !session?.user) return;
-
-    console.log("📤 Sending message");
-
     socketRef.current.emit("sendMessage", {
       roomId,
       senderId: session.user.id,
@@ -330,9 +289,8 @@ export default function Chat({ roomId }: ChatProps) {
     setNewMessage("");
   };
 
-  const handleSelectSuggestion = (suggestion: string) => {
+  const handleSelectSuggestion = (suggestion: string) =>
     setNewMessage(suggestion);
-  };
 
   const handleUpdate = (id: string) => {
     const newText = prompt("Enter updated message:");
@@ -359,15 +317,11 @@ export default function Chat({ roomId }: ChatProps) {
     });
   };
 
-  // 🎥 VIDEO CALL HANDLERS
   const handleCallStart = (callData: {
     meetingId: string;
     callerName: string;
     timestamp: number;
   }) => {
-    console.log("📞 Broadcasting call start:", callData);
-
-    // Broadcast to other users in the room
     if (socketRef.current) {
       socketRef.current.emit("call-started", {
         roomId,
@@ -385,9 +339,6 @@ export default function Chat({ roomId }: ChatProps) {
     duration: number;
     timestamp: number;
   }) => {
-    console.log("📞 Broadcasting call end:", callData);
-
-    // Broadcast to other users
     if (socketRef.current) {
       socketRef.current.emit("call-ended", {
         roomId,
@@ -400,7 +351,6 @@ export default function Chat({ roomId }: ChatProps) {
   };
 
   const handleSendCallMessage = (msg: string) => {
-    // Send as a system message
     if (socketRef.current) {
       socketRef.current.emit("sendMessage", {
         roomId,
@@ -413,69 +363,60 @@ export default function Chat({ roomId }: ChatProps) {
     }
   };
 
-  const handleAcceptCall = async () => {
-    if (!incomingCall) return;
-    
-    const roomToJoin = incomingCall.meetingId || roomId;
+ const handleAcceptCall = async () => {
+  if (!incomingCall) return;
+  const roomToJoin = roomId;
+  setIncomingCall(null);
 
-    setIncomingCall(null); // Hide notification immediately
-    
-    try {
-      console.log("📞 Accepting call for room:", roomToJoin);
-      
-      // 1. Fetch the token from your new API
-      const res = await fetch("/api/videocall/token", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomName: roomToJoin }),
-      });
+  try {
+    console.log("📞 Accepting call for room:", roomToJoin);
 
-      if (!res.ok) {
-        const errorData = await res.json();
-        console.error("❌ Token request failed:", res.status, errorData);
-        throw new Error(`Failed to get token: ${errorData.error || "Server error"}`);
-      }
+    const res = await fetch("/api/videocall/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomName: roomToJoin }),
+    });
 
-      const data = await res.json();
-      
-      if (!data.token) {
-        console.error("❌ No token in response:", data);
-        throw new Error("Server did not return a token");
-      }
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(`Failed to get token: ${errorData.error || "Server error"}`);
+    }
 
-      if (typeof data.token !== "string") {
-        console.error("❌ Token is not a string:", typeof data.token, data.token);
-        throw new Error("Invalid token format received");
-      }
+    const data = await res.json();
 
-      console.log("✅ Token received successfully, length:", data.token.length);
-      setCallToken(data.token);
-      setShowEmbeddedCall(true);
-      setCallStartTime(Date.now());
-      
+    if (!data.token || typeof data.token !== "string") {
+      throw new Error("Invalid token format received from server");
+    }
+
+    console.log("✅ Token received, length:", data.token.length);
+
+    // Set all state in one batch before any side effects
+    setCallToken(data.token);
+    setActiveCallRoomName(roomToJoin);
+    setCallStartTime(Date.now());
+    setShowEmbeddedCall(true);
+
+    // DELAY the message send so it doesn't cause a re-render mid-join
+    setTimeout(() => {
       handleSendCallMessage(
         locale === "ru"
           ? `📞 ${session?.user?.name} присоединился к звонку`
           : `📞 ${session?.user?.name} joined the video call`,
       );
-    } catch (error) {
-      console.error("❌ Failed to join call:", error);
-      alert(
-        `Failed to join call: ${error instanceof Error ? error.message : "Unknown error"}\n\nPlease try again.`
-      );
-      // Reset state on error
-      setShowEmbeddedCall(false);
-      setCallToken(null);
-    }
-  };
+    }, 2000);
+
+  } catch (error) {
+    console.error("❌ Failed to join call:", error);
+    alert(`Failed to join call: ${error instanceof Error ? error.message : "Unknown error"}\n\nPlease try again.`);
+    setShowEmbeddedCall(false);
+    setCallToken(null);
+    setActiveCallRoomName(null);
+  }
+};
 
   const handleCloseEmbeddedCall = () => {
-    console.log("📞 Closing embedded video call");
-
     if (callStartTime) {
       const duration = Math.floor((Date.now() - callStartTime) / 1000);
-
-      // Broadcast call end to other users
       if (socketRef.current) {
         socketRef.current.emit("call-ended", {
           roomId,
@@ -485,8 +426,6 @@ export default function Chat({ roomId }: ChatProps) {
           timestamp: Date.now(),
         });
       }
-
-      // Send leave message
       const minutes = Math.floor(duration / 60);
       const seconds = duration % 60;
       const durationText =
@@ -496,16 +435,15 @@ export default function Chat({ roomId }: ChatProps) {
           ? `📞 ${session?.user?.name} покинул звонок • Длительность: ${durationText}`
           : `📞 ${session?.user?.name} left the call • Duration: ${durationText}`,
       );
-
       setCallStartTime(null);
     }
 
     setShowEmbeddedCall(false);
+    setCallToken(null);
+    setActiveCallRoomName(null);
   };
 
-  const handleDeclineCall = () => {
-    setIncomingCall(null);
-  };
+  const handleDeclineCall = () => setIncomingCall(null);
 
   const handleSummarize = async () => {
     if (messages.length === 0) {
@@ -519,10 +457,9 @@ export default function Chat({ roomId }: ChatProps) {
 
     setLoadingSummary(true);
     setIsSummaryPanelOpen(true);
-    const url = "/api/summarize";
 
     try {
-      const res = await fetch(url, {
+      const res = await fetch("/api/summarize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ roomId, userId: selectedUserId }),
@@ -542,23 +479,20 @@ export default function Chat({ roomId }: ChatProps) {
         setSummary(JSON.stringify(data, null, 2) || "No summary available.");
       }
     } catch (error) {
-      console.error("❌ Summarization error:", error);
       setSummary(
-        `Failed to summarize: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
+        `Failed to summarize: ${error instanceof Error ? error.message : "Unknown error"}`,
       );
     } finally {
       setLoadingSummary(false);
     }
   };
 
-  // ✅ Render embedded video call if active
-  if (showEmbeddedCall && session?.user) {
+  // Render embedded video call if active
+  if (showEmbeddedCall && session?.user && activeCallRoomName && callToken) {
     return (
       <div className="fixed inset-0 z-50 bg-gray-900">
         <VideoCallWithTranscription
-          roomName={roomId}
+          roomName={activeCallRoomName}
           displayName={session.user.name || "Guest"}
           userId={session.user.id!}
           onClose={handleCloseEmbeddedCall}
@@ -586,7 +520,6 @@ export default function Chat({ roomId }: ChatProps) {
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-indigo-50 to-slate-100 flex flex-col font-sans text-gray-800 overflow-hidden">
-      {/* 🎥 CALL NOTIFICATION OVERLAY */}
       {incomingCall && (
         <CallNotification
           callerName={incomingCall.callerName}
@@ -613,7 +546,6 @@ export default function Chat({ roomId }: ChatProps) {
             </div>
 
             <div className="flex items-center gap-3">
-              {/* Online Users Count */}
               <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-green-50 rounded-lg border border-green-200">
                 <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                 <span className="text-sm font-medium text-green-700">
@@ -621,7 +553,6 @@ export default function Chat({ roomId }: ChatProps) {
                 </span>
               </div>
 
-              {/* Summary Toggle */}
               <button
                 onClick={() => setIsSummaryPanelOpen(!isSummaryPanelOpen)}
                 className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all duration-200 font-medium text-sm shadow-md hover:shadow-lg flex items-center gap-2"
@@ -657,7 +588,6 @@ export default function Chat({ roomId }: ChatProps) {
 
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden relative">
-        {/* Chat Area */}
         <div
           className="flex-1 flex flex-col overflow-hidden"
           style={{
@@ -689,7 +619,6 @@ export default function Chat({ roomId }: ChatProps) {
                     {locale === "ru" ? "В комнате:" : "In room:"}
                   </span>
                 </div>
-
                 <div className="flex flex-wrap gap-2">
                   {onlineUsers.length === 0 ? (
                     <span className="text-sm text-slate-400 italic">
@@ -753,7 +682,6 @@ export default function Chat({ roomId }: ChatProps) {
                   messages.map((msg) => (
                     <div key={msg._id}>
                       {msg.senderId === "system" || msg.type === "system" ? (
-                        // System Message
                         <div className="flex justify-center my-3">
                           <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-2 rounded-full border border-blue-200 shadow-sm">
                             <p className="text-sm text-blue-700 font-medium">
@@ -762,33 +690,19 @@ export default function Chat({ roomId }: ChatProps) {
                           </div>
                         </div>
                       ) : (
-                        // Regular Message
                         <div
-                          className={`flex ${
-                            msg.senderId === session?.user?.id
-                              ? "justify-end"
-                              : "justify-start"
-                          }`}
+                          className={`flex ${msg.senderId === session?.user?.id ? "justify-end" : "justify-start"}`}
                         >
                           <div
-                            className={`max-w-[75%] sm:max-w-[70%] rounded-2xl p-3 shadow-md transition-all duration-200 hover:shadow-lg ${
-                              msg.senderId === session?.user?.id
-                                ? "bg-gradient-to-br from-indigo-500 to-blue-500 text-white"
-                                : "bg-white border border-slate-200 text-slate-800"
-                            }`}
+                            className={`max-w-[75%] sm:max-w-[70%] rounded-2xl p-3 shadow-md transition-all duration-200 hover:shadow-lg ${msg.senderId === session?.user?.id ? "bg-gradient-to-br from-indigo-500 to-blue-500 text-white" : "bg-white border border-slate-200 text-slate-800"}`}
                           >
                             <div className="flex items-center justify-between gap-3 mb-1">
                               <span
-                                className={`font-semibold text-xs ${
-                                  msg.senderId === session?.user?.id
-                                    ? "text-indigo-100"
-                                    : "text-slate-600"
-                                }`}
+                                className={`font-semibold text-xs ${msg.senderId === session?.user?.id ? "text-indigo-100" : "text-slate-600"}`}
                               >
                                 {msg.sender?.name ||
                                   (locale === "ru" ? "Гость" : "Guest")}
                               </span>
-
                               {msg.senderId === session?.user?.id && (
                                 <div className="flex items-center gap-1.5">
                                   <button
@@ -796,9 +710,6 @@ export default function Chat({ roomId }: ChatProps) {
                                       handleUpdate(String(msg._id))
                                     }
                                     className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-all duration-200"
-                                    title={
-                                      locale === "ru" ? "Редактировать" : "Edit"
-                                    }
                                   >
                                     <svg
                                       className="w-3.5 h-3.5"
@@ -819,9 +730,6 @@ export default function Chat({ roomId }: ChatProps) {
                                       handleDelete(String(msg._id))
                                     }
                                     className="p-1.5 rounded-lg bg-white/20 hover:bg-red-400 transition-all duration-200"
-                                    title={
-                                      locale === "ru" ? "Удалить" : "Delete"
-                                    }
                                   >
                                     <svg
                                       className="w-3.5 h-3.5"
@@ -840,7 +748,6 @@ export default function Chat({ roomId }: ChatProps) {
                                 </div>
                               )}
                             </div>
-
                             <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
                               {msg.content}
                             </p>
@@ -906,7 +813,6 @@ export default function Chat({ roomId }: ChatProps) {
                   locale={locale}
                 />
               )}
-
               <VideoChatButton
                 meetingId={roomId}
                 userId={session?.user?.id || ""}
@@ -922,12 +828,9 @@ export default function Chat({ roomId }: ChatProps) {
 
         {/* Collapsible Summary Panel */}
         <div
-          className={`fixed top-0 right-0 h-full bg-white border-l-2 border-indigo-200 shadow-2xl transform transition-transform duration-300 ease-in-out z-40 ${
-            isSummaryPanelOpen ? "translate-x-0" : "translate-x-full"
-          }`}
+          className={`fixed top-0 right-0 h-full bg-white border-l-2 border-indigo-200 shadow-2xl transform transition-transform duration-300 ease-in-out z-40 ${isSummaryPanelOpen ? "translate-x-0" : "translate-x-full"}`}
           style={{ width: `${summaryPanelWidth}px` }}
         >
-          {/* Resize Handle */}
           <div
             ref={resizeRef}
             className="absolute left-0 top-0 w-1 h-full cursor-ew-resize hover:bg-indigo-400 bg-indigo-200 transition-colors duration-200"
@@ -935,7 +838,6 @@ export default function Chat({ roomId }: ChatProps) {
           />
 
           <div className="h-full flex flex-col">
-            {/* Panel Header */}
             <div className="p-4 border-b-2 border-indigo-100 bg-gradient-to-r from-indigo-50 to-blue-50 flex items-center justify-between">
               <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 <svg
@@ -973,9 +875,7 @@ export default function Chat({ roomId }: ChatProps) {
               </button>
             </div>
 
-            {/* Panel Content */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              {/* User Selection */}
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-slate-700">
                   {locale === "ru" ? "Суммировать для:" : "Summarize for:"}
@@ -996,7 +896,6 @@ export default function Chat({ roomId }: ChatProps) {
                 </select>
               </div>
 
-              {/* Summarize Button */}
               <button
                 onClick={handleSummarize}
                 disabled={loadingSummary || messages.length === 0}
@@ -1031,7 +930,6 @@ export default function Chat({ roomId }: ChatProps) {
                 )}
               </button>
 
-              {/* Summary Display */}
               {summary && (
                 <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-4 border-2 border-indigo-200 shadow-sm">
                   <div className="flex items-start gap-2 mb-3">
@@ -1052,11 +950,9 @@ export default function Chat({ roomId }: ChatProps) {
                       <h3 className="font-semibold text-indigo-700 mb-2">
                         {locale === "ru" ? "Резюме:" : "Summary:"}
                       </h3>
-                      <div className="prose prose-sm max-w-none">
-                        <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">
-                          {summary}
-                        </p>
-                      </div>
+                      <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">
+                        {summary}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1089,7 +985,6 @@ export default function Chat({ roomId }: ChatProps) {
         </div>
       </main>
 
-      {/* Footer */}
       <footer className="bg-white/80 backdrop-blur-sm border-t border-slate-200 py-3 px-4 text-center">
         <p className="text-sm text-slate-500">
           {locale === "ru"
