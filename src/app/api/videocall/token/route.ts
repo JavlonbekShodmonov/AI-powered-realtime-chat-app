@@ -40,25 +40,31 @@ export async function POST(request: Request) {
   try {
     // 1. Try to create or get the room
     console.log("🌐 Creating/getting room on Daily API...");
+    
+    const roomPayload = {
+      name: sanitizedRoomName,
+      properties: {
+        exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour expiry
+        eject_at_room_exp: true,
+        enable_chat: true,
+      },
+    };
+    
+    console.log("🌐 Room request payload:", JSON.stringify(roomPayload));
+    
     const roomRes = await fetch("https://api.daily.co/v1/rooms", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        name: sanitizedRoomName,
-        properties: {
-          exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour expiry
-          eject_at_room_exp: true,
-          enable_chat: true,
-        },
-      }),
+      body: JSON.stringify(roomPayload),
     });
 
     const roomData = await roomRes.json();
     
     console.log("🌐 Room API status:", roomRes.status);
+    console.log("🌐 Room API response:", JSON.stringify(roomData));
     
     if (!roomRes.ok) {
       console.error("⚠️ Room creation response:", JSON.stringify(roomData));
@@ -81,22 +87,28 @@ export async function POST(request: Request) {
 
     // 2. Generate the token for that specific room
     console.log("🔐 Generating meeting token...");
+    
+    const tokenPayload = {
+      room_name: sanitizedRoomName,
+      is_owner: true,
+      exp: Math.floor(Date.now() / 1000) + 1800, // 30 min safety
+    };
+    
+    console.log("🔐 Token request payload:", JSON.stringify(tokenPayload));
+    
     const tokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        room_name: sanitizedRoomName,
-        is_owner: true,
-        exp: Math.floor(Date.now() / 1000) + 1800, // 30 min safety
-      }),
+      body: JSON.stringify(tokenPayload),
     });
 
     const tokenData = await tokenRes.json();
     
     console.log("🔐 Token API status:", tokenRes.status);
+    console.log("🔐 Token API response:", JSON.stringify(tokenData));
 
     if (!tokenRes.ok) {
       console.error("❌ Token generation failed:", JSON.stringify(tokenData));
