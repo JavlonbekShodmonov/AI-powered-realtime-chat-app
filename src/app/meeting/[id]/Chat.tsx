@@ -413,8 +413,6 @@ export default function Chat({ roomId }: ChatProps) {
     }
   };
 
-  // Inside your main file
-
   const handleAcceptCall = async () => {
     if (!incomingCall) return;
     
@@ -423,30 +421,51 @@ export default function Chat({ roomId }: ChatProps) {
     setIncomingCall(null); // Hide notification immediately
     
     try {
-      // 1. Fetch the token from your new API (Invisible login)
+      console.log("📞 Accepting call for room:", roomToJoin);
+      
+      // 1. Fetch the token from your new API
       const res = await fetch("/api/videocall/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ roomName: roomToJoin }),
       });
-      // In Chat.tsx handleAcceptCall
-      const data = await res.json();
-      if (data.token && typeof data.token === "string") {
-        setCallToken(data.token);
-        setShowEmbeddedCall(true);
-      } else {
-        console.error("Token received is not a string:", data.token);
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        console.error("❌ Token request failed:", res.status, errorData);
+        throw new Error(`Failed to get token: ${errorData.error || "Server error"}`);
       }
+
+      const data = await res.json();
+      
+      if (!data.token) {
+        console.error("❌ No token in response:", data);
+        throw new Error("Server did not return a token");
+      }
+
+      if (typeof data.token !== "string") {
+        console.error("❌ Token is not a string:", typeof data.token, data.token);
+        throw new Error("Invalid token format received");
+      }
+
+      console.log("✅ Token received successfully, length:", data.token.length);
+      setCallToken(data.token);
+      setShowEmbeddedCall(true);
       setCallStartTime(Date.now());
+      
       handleSendCallMessage(
         locale === "ru"
           ? `📞 ${session?.user?.name} присоединился к звонку`
           : `📞 ${session?.user?.name} joined the video call`,
       );
-      setIncomingCall(null);
     } catch (error) {
-      console.error("Failed to join call:", error);
-      alert("Failed to join call. Please try again.");
+      console.error("❌ Failed to join call:", error);
+      alert(
+        `Failed to join call: ${error instanceof Error ? error.message : "Unknown error"}\n\nPlease try again.`
+      );
+      // Reset state on error
+      setShowEmbeddedCall(false);
+      setCallToken(null);
     }
   };
 
