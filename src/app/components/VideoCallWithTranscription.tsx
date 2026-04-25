@@ -129,9 +129,14 @@ export default function VideoCallWithTranscription({
     // 2. Join the call
     callFrame
       .join({ url: roomUrl, token })
-      .catch((err) => console.error("Daily join error details:", JSON.stringify(err, null, 2)))
-      callFrame.destroy();
-      frameRef.current = null;
+      .then(() => {
+        console.log("✅ Successfully joined Daily room");
+      })
+      .catch((err) => {
+        console.error("Daily join error details:", JSON.stringify(err, null, 2));
+        callFrame.destroy();
+        frameRef.current = null;
+      });
 
     // 3. Events
     callFrame.on("joined-meeting", () => setIsLoading(false));

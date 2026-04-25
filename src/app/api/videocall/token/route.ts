@@ -5,34 +5,36 @@ export async function POST(request: Request) {
   const apiKey = process.env.DAILY_API_KEY;
 
   try {
-    // 1. Tell Daily to create the room (or just get it if it exists)
-    // We set a 1-hour expiry so the room deletes itself automatically
+    // 1. Create the room with properties
     const roomRes = await fetch("https://api.daily.co/v1/rooms", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
       },
+      body: JSON.stringify({
+        name: roomName,
+        properties: {
+          exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour expiry
+          eject_at_room_exp: true,
+          enable_chat: true,
+        },
+      }),
     });
 
-    if (roomRes.status === 404) {
-      // Room doesn't exist, create it
-      await fetch("https://api.daily.co/v1/rooms", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          name: roomName,
-          properties: {
-            exp: Math.floor(Date.now() / 1000) + 3600, // 1 hour safety
-            eject_at_room_exp: true,
-            enable_chat: true,
-          },
-        }),
-      });
+    if (!roomRes.ok) {
+      const error = await roomRes.json();
+      console.error("Daily room creation error:", error);
+      // Room might already exist, which is fine - continue to token generation
+      if (error.error?.type !== "already-exists") {
+        return NextResponse.json(
+          { error: "Failed to create room" },
+          { status: 500 },
+        );
+      }
     }
 
-    // 2. Now generate the token for that specific room
+    // 2. Generate the token for that specific room
     const tokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
       method: "POST",
       headers: {
@@ -54,11 +56,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ token: tokenData.token });
     }
 
+    console.error("Token generation error:", tokenData);
     return NextResponse.json(
-      { error: "Failed to sync room/token" },
+      { error: "Failed to generate token" },
       { status: 500 },
     );
   } catch (error) {
+    console.error("Daily API error:", error);
     return NextResponse.json(
       { error: "Daily API connection failed" },
       { status: 500 },
