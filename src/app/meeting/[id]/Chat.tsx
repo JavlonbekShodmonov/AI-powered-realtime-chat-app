@@ -56,6 +56,7 @@ export default function Chat({ roomId }: ChatProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const resizeRef = useRef<HTMLDivElement>(null);
+  const [callToken, setCallToken] = useState<string | null>(null);
 
   console.log("RENDER TYPES", {
     messages: Array.isArray(messages),
@@ -413,13 +414,14 @@ export default function Chat({ roomId }: ChatProps) {
   };
 
   // Inside your main file
-  const [callToken, setCallToken] = useState<string | null>(null);
 
   const handleAcceptCall = async () => {
     if (!incomingCall) return;
     
     const roomToJoin = incomingCall.meetingId || roomId;
 
+    setIncomingCall(null); // Hide notification immediately
+    
     try {
       // 1. Fetch the token from your new API (Invisible login)
       const res = await fetch("/api/videocall/token", {
@@ -534,7 +536,6 @@ export default function Chat({ roomId }: ChatProps) {
 
   // ✅ Render embedded video call if active
   if (showEmbeddedCall && session?.user) {
-    const [callToken, setCallToken] = useState<string | null>(null);
     return (
       <div className="fixed inset-0 z-50 bg-gray-900">
         <VideoCallWithTranscription

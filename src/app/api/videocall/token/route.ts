@@ -3,6 +3,8 @@ import { NextResponse } from 'next/server';
 export async function POST(request: Request) {
   const { roomName } = await request.json();
 
+  const expiryTime = Math.floor(Date.now() / 1000) + 1800;
+
   const response = await fetch('https://api.daily.co/v1/meeting-tokens', {
     method: 'POST',
     headers: {
@@ -10,7 +12,7 @@ export async function POST(request: Request) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      properties: { room_name: roomName, is_owner: true },
+      properties: { room_name: roomName, is_owner: true, exp: expiryTime, eject_at_token_exp: true },
     }),
   });
 

@@ -60,6 +60,7 @@ export default function VideoCallWithTranscription({
   const [showMobileWarning, setShowMobileWarning] = useState(true);
   const containerRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<any>(null);
+  const isInitializing = useRef(false);
 
   const LANGUAGES = [
     { code: "en-US", name: "English (US)", flag: "🇺🇸" },
@@ -104,7 +105,9 @@ export default function VideoCallWithTranscription({
 
   useEffect(() => {
     // 1. Guard: Only run if we have a container, a token, and NOT an existing frame
-    if (!containerRef.current || !token || frameRef.current) return;
+    if (!containerRef.current || !token || frameRef.current || isInitializing.current) return;
+
+    isInitializing.current = true;
 
     console.log("🚀 Initializing Daily frame with token...");
 
@@ -126,12 +129,14 @@ export default function VideoCallWithTranscription({
     // 2. Join the call
     callFrame
       .join({ url: roomUrl, token })
-      .catch((err) => console.error("Daily join error:", err));
+      .catch((err) => console.error("Daily join error details:", JSON.stringify(err, null, 2)))
+      callFrame.destroy();
+      frameRef.current = null;
 
     // 3. Events
     callFrame.on("joined-meeting", () => setIsLoading(false));
     callFrame.on("left-meeting", () => onClose?.());
-    callFrame.on("error", (e) => console.error("Daily SDK Error:", e));
+    callFrame.on("error", (e) => console.error("Daily SDK Error details:", JSON.stringify(e, null, 2)));
 
     // 4. CRITICAL CLEANUP: This prevents the "Duplicate Instance" error
     return () => {
@@ -139,6 +144,7 @@ export default function VideoCallWithTranscription({
         console.log("🧹 Destroying Daily instance...");
         frameRef.current.destroy();
         frameRef.current = null;
+        isInitializing.current = false;
       }
     };
   }, [roomName, token, displayName, onClose]);
