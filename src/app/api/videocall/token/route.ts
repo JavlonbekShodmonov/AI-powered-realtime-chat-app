@@ -42,14 +42,15 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-  pproperties: {
-  exp: Math.floor(Date.now() / 1000) + 3600,
-  eject_at_room_exp: true,
-  enable_chat: true,
-  enable_prejoin_ui: false,
-  allowed_domains: ["summeet.vercel.app"],
-},
-}),
+        properties: {
+          exp: Math.floor(Date.now() / 1000) + 3600,
+          eject_at_room_exp: true,
+          enable_chat: true,
+          enable_prejoin_ui: false,
+          start_video_off: false,
+          start_audio_off: false,
+        },
+      }),
     });
 
     const roomData = await roomRes.json();
@@ -74,13 +75,10 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             properties: {
-  exp: Math.floor(Date.now() / 1000) + 3600,
-  eject_at_room_exp: true,
-  enable_chat: true,
-  enable_prejoin_ui: false,
-  start_video_off: false,
-  start_audio_off: false,
-},
+              exp: Math.floor(Date.now() / 1000) + 3600,
+              eject_at_room_exp: true,
+              enable_prejoin_ui: false,
+            },
           }),
         },
       );
@@ -108,14 +106,14 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-       properties: {
-  exp: Math.floor(Date.now() / 1000) + 3600,
-  eject_at_room_exp: true,
-  enable_chat: true,
-  enable_prejoin_ui: false,
-  start_video_off: false,
-  start_audio_off: false,
-},
+        properties: {
+          exp: Math.floor(Date.now() / 1000) + 3600,
+          eject_at_room_exp: true,
+          enable_chat: true,
+          enable_prejoin_ui: false,
+          start_video_off: false,
+          start_audio_off: false,
+        },
       }),
     });
 
