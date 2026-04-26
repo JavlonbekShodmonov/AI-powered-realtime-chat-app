@@ -42,13 +42,12 @@ export async function POST(request: Request) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        name: sanitizedRoomName,
         properties: {
           exp: Math.floor(Date.now() / 1000) + 3600,
           eject_at_room_exp: true,
           enable_chat: true,
           enable_prejoin_ui: false,
-          start_video_off: false,
-          start_audio_off: false,
         },
       }),
     });
@@ -62,7 +61,7 @@ export async function POST(request: Request) {
     } else if (
       (roomData.info || roomData.error || "").toLowerCase().includes("already")
     ) {
-      // Room exists — refresh its expiry so it never hangs on an expired room
+      // Room exists — refresh its expiry
       console.log("🔄 Room exists, refreshing expiry...");
 
       const updateRes = await fetch(
@@ -96,7 +95,7 @@ export async function POST(request: Request) {
       throw new Error(`Daily API error: ${roomData.error || "Unknown error"}`);
     }
 
-    // 2. Generate the token
+    // 2. Generate the token — room_name is required!
     console.log("🔐 Generating meeting token...");
 
     const tokenRes = await fetch("https://api.daily.co/v1/meeting-tokens", {
@@ -107,12 +106,10 @@ export async function POST(request: Request) {
       },
       body: JSON.stringify({
         properties: {
+          room_name: sanitizedRoomName,
+          is_owner: true,
           exp: Math.floor(Date.now() / 1000) + 3600,
-          eject_at_room_exp: true,
-          enable_chat: true,
           enable_prejoin_ui: false,
-          start_video_off: false,
-          start_audio_off: false,
         },
       }),
     });
