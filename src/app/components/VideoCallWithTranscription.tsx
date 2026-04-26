@@ -166,15 +166,18 @@ export default function VideoCallWithTranscription({
 
         console.log("🚀 Creating Daily frame...");
         const callFrame = DailyIframe.createFrame(containerRef.current!, {
-          iframeStyle: {
-            width: "100%",
-            height: "100%",
-            border: "0",
-            backgroundColor: "#111827",
-          },
-          showLeaveButton: true,
-          userName: displayName,
-        });
+  iframeStyle: {
+    width: "100%",
+    height: "100%",
+    border: "0",
+    backgroundColor: "#111827",
+  },
+  showLeaveButton: true,
+  userName: displayName,
+  showFullscreenButton: true,
+  dailyConfig: {
+  },
+});
 
         if (destroyed) {
           try {
@@ -207,10 +210,15 @@ export default function VideoCallWithTranscription({
               15000,
             ),
           );
-          await Promise.race([
-            callFrame.join({ url: roomUrl, token }),
-            joinTimeout,
-          ]);
+         await Promise.race([
+  callFrame.join({ 
+    url: roomUrl, 
+    token,
+    startVideoOff: false,
+    startAudioOff: false,
+  }),
+  joinTimeout,
+]);
           console.log("✅ join() resolved");
         } catch (joinErr: any) {
           console.error("❌ JOIN FAILED:", joinErr?.message || joinErr);
