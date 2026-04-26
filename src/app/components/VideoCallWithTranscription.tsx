@@ -16,6 +16,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import DailyIframe from "@daily-co/daily-js";
+const dailyInstanceRef = { current: false }; // module-level, outside component
 
 interface Transcript {
   _id: string;
@@ -122,7 +123,6 @@ export default function VideoCallWithTranscription({
   // before touching Daily so that a same-tick cleanup can cancel us before
   // we ever call createFrame(). Every async boundary re-checks cancelled so
   // we bail and self-destruct if we were superseded.
-  const dailyInstanceRef = { current: false }; // module-level, outside component
 
   useEffect(() => {
     if (!token || !containerRef.current) return;
@@ -200,7 +200,22 @@ export default function VideoCallWithTranscription({
 
         const roomUrl = `https://summeet.daily.co/${roomName}`;
         console.log("🔗 Joining:", roomUrl);
-        await callFrame.join({ url: roomUrl, token });
+        try {
+          const joinTimeout = new Promise((_, reject) =>
+            setTimeout(
+              () => reject(new Error("Join timed out after 15s")),
+              15000,
+            ),
+          );
+          await Promise.race([
+            callFrame.join({ url: roomUrl, token }),
+            joinTimeout,
+          ]);
+          console.log("✅ join() resolved");
+        } catch (joinErr: any) {
+          console.error("❌ JOIN FAILED:", joinErr?.message || joinErr);
+          throw joinErr;
+        }
         console.log("✅ join() resolved"); // ADD THIS
 
         if (destroyed) return;
