@@ -117,59 +117,54 @@ export default function VideoCallWithTranscription({
     { code: "az-AZ", name: "Azərbaycan dili", flag: "🇦🇿" },
   ];
 
-  useEffect(() => {
-    if (!token || !containerRef.current) return;
+ useEffect(() => {
+  if (!token || !containerRef.current) return;
 
-    // Use a local variable to prevent race conditions during cleanup
-    let destroyed = false;
+  let callFrame: any = null;
 
-    const initializeDaily = async () => {
-      // 1. Clean up ANY existing instance before starting
-      const existingInstance = DailyIframe.getCallInstance();
-      if (existingInstance) {
-        await existingInstance.destroy();
-      }
+  const startCall = async () => {
+    // 1. CLEAR EVERYTHING first - Total reset
+    if (DailyIframe.getCallInstance()) {
+      await DailyIframe.getCallInstance()?.destroy();
+    }
+    containerRef.current!.innerHTML = "";
 
-      if (destroyed || !containerRef.current) return;
+    // 2. FORCE PERMISSIONS manually on the container
+    // This is the "Magic Sauce" that prevents the chrome-error block
+    containerRef.current!.setAttribute(
+      "allow",
+      "camera; microphone; display-capture; autoplay; clipboard-write"
+    );
 
-      // 2. Create the frame
-      const callFrame = DailyIframe.createFrame(containerRef.current, {
-        iframeStyle: {
-          width: "100%",
-          height: "100%",
-          border: "0",
-          backgroundColor: "#111827",
-        },
-        showLeaveButton: true,
-        userName: displayName,
-      });
+    // 3. Use createFrame with the specific URL immediately
+    // Don't wait for a second .join() call; put the URL in the config
+    callFrame = DailyIframe.createFrame(containerRef.current!, {
+      url: `https://summeet.daily.co/${roomName}`,
+      token: token,
+      showLeaveButton: true,
+      iframeStyle: {
+        width: "100%",
+        height: "100%",
+        border: "0",
+      },
+    });
 
-      containerRef.current.setAttribute(
-        "allow",
-        "camera; microphone; display-capture; autoplay; clipboard-write; local-network-access",
-      );
-      // 3. Join with the specific room URL
-      try {
-        await callFrame.join({
-          url: `https://summeet.daily.co/${roomName}`,
-          token: token,
-        });
-      } catch (e) {
-        console.error("Join error", e);
-      }
-    };
+    // 4. Standard Join
+    try {
+      await callFrame.join();
+    } catch (e) {
+      console.error("Daily join error:", e);
+    }
+  };
 
-    initializeDaily();
+  startCall();
 
-    return () => {
-      destroyed = true;
-      if (frameRef.current) {
-        frameRef.current.destroy();
-        frameRef.current = null;
-      }
-    };
-  }, [token, roomName]); // Remove displayName from here to prevent re-joins when user changes name
-
+  return () => {
+    if (callFrame) {
+      callFrame.destroy();
+    }
+  };
+}, [token, roomName]); // ONLY these two. Do NOT include any UI state here.
   const getSpeechStatus = () => {
     if (transcriptionError) return `Error: ${transcriptionError}`;
     if (isTranscribing && isMobileMode) {
