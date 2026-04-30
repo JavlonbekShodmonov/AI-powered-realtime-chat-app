@@ -118,55 +118,57 @@ export default function VideoCallWithTranscription({
   ];
 
   useEffect(() => {
-  if (!token || !containerRef.current) return;
-  
-  // Use a local variable to prevent race conditions during cleanup
-  let destroyed = false; 
+    if (!token || !containerRef.current) return;
 
-  const initializeDaily = async () => {
-    // 1. Clean up ANY existing instance before starting
-    const existingInstance = DailyIframe.getCallInstance();
-    if (existingInstance) {
-      await existingInstance.destroy();
-    }
+    // Use a local variable to prevent race conditions during cleanup
+    let destroyed = false;
 
-    if (destroyed || !containerRef.current) return;
+    const initializeDaily = async () => {
+      // 1. Clean up ANY existing instance before starting
+      const existingInstance = DailyIframe.getCallInstance();
+      if (existingInstance) {
+        await existingInstance.destroy();
+      }
 
-    // 2. Create the frame
-    const callFrame = DailyIframe.createFrame(containerRef.current, {
-      iframeStyle: {
-        width: "100%",
-        height: "100%",
-        border: "0",
-        backgroundColor: "#111827",
-      },
-      showLeaveButton: true,
-      userName: displayName,
-    });
+      if (destroyed || !containerRef.current) return;
 
-    frameRef.current = callFrame;
-
-    // 3. Join with the specific room URL
-    try {
-      await callFrame.join({ 
-        url: `https://summeet.daily.co/${roomName}`, 
-        token: token 
+      // 2. Create the frame
+      const callFrame = DailyIframe.createFrame(containerRef.current, {
+        iframeStyle: {
+          width: "100%",
+          height: "100%",
+          border: "0",
+          backgroundColor: "#111827",
+        },
+        showLeaveButton: true,
+        userName: displayName,
       });
-    } catch (e) {
-      console.error("Join error", e);
-    }
-  };
 
-  initializeDaily();
+      containerRef.current.setAttribute(
+        "allow",
+        "camera; microphone; display-capture; autoplay; clipboard-write; local-network-access",
+      );
+      // 3. Join with the specific room URL
+      try {
+        await callFrame.join({
+          url: `https://summeet.daily.co/${roomName}`,
+          token: token,
+        });
+      } catch (e) {
+        console.error("Join error", e);
+      }
+    };
 
-  return () => {
-    destroyed = true;
-    if (frameRef.current) {
-      frameRef.current.destroy();
-      frameRef.current = null;
-    }
-  };
-}, [token, roomName]); // Remove displayName from here to prevent re-joins when user changes name
+    initializeDaily();
+
+    return () => {
+      destroyed = true;
+      if (frameRef.current) {
+        frameRef.current.destroy();
+        frameRef.current = null;
+      }
+    };
+  }, [token, roomName]); // Remove displayName from here to prevent re-joins when user changes name
 
   const getSpeechStatus = () => {
     if (transcriptionError) return `Error: ${transcriptionError}`;
@@ -377,7 +379,9 @@ export default function VideoCallWithTranscription({
                 <div className="flex-1">
                   <p className="font-bold text-sm mb-1">📱 Mobile Device</p>
                   <p className="text-xs leading-relaxed">
-                    📊 Now using AI transcription on mobile! Transcripts will be processed on-device using browser-whisper (no API key needed).
+                    📊 Now using AI transcription on mobile! Transcripts will be
+                    processed on-device using browser-whisper (no API key
+                    needed).
                   </p>
                 </div>
                 <button

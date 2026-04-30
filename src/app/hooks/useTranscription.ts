@@ -3,6 +3,7 @@
 // Mobile  → MediaRecorder + browser-whisper WASM (free, on-device, no API key)
 
 import { useRef, useState, useCallback, useEffect } from "react";
+import * as whisperImport from "browser-whisper";
 // Define the shape of the whisper module for TypeScript
 interface WhisperModule {
   transcribe: (
@@ -14,8 +15,7 @@ interface WhisperModule {
   ) => Promise<{ text: string }>;
 }
 
-// Cast the import to that shape
-import whisperImport from "browser-whisper";
+// Cast the import to the defined interface
 const whisper = whisperImport as unknown as WhisperModule;
 // ─── helpers ───────────────────────────────────────────────────────────────
 
@@ -132,36 +132,46 @@ export function useTranscription({ language = "en-US" } = {}) {
     }
   }, []);
 
-const stopMobile = useCallback(async () => {
-  setIsListening(false);
-  if (!mediaRecorderRef.current) return;
+  const stopMobile = useCallback(async () => {
+    setIsListening(false);
+    if (
+      !mediaRecorderRef.current ||
+      mediaRecorderRef.current.state === "inactive"
+    )
+      return;
 
-  mediaRecorderRef.current.stop();
-  
-  // Wait for the final blob
-  const audioBlob = await new Promise<Blob>((resolve) => {
-    mediaRecorderRef.current!.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: getSupportedMimeType() });
-      resolve(blob);
-    };
-  });
-
-  try {
-    setIsTranscribing(true);
-    // Use the typed whisper instance here
-    const result = await whisper.transcribe(audioBlob, {
-      language: language.split("-")[0],
-      onProgress: (p: number) => setTranscribeProgress(p), // Fixed 'any' error
+    // Create the promise before calling .stop() to ensure we catch the event
+    const blobPromise = new Promise<Blob>((resolve) => {
+      mediaRecorderRef.current!.onstop = () => {
+        const blob = new Blob(chunksRef.current, {
+          type: getSupportedMimeType(),
+        });
+        resolve(blob);
+      };
     });
 
-    setTranscript(result.text);
-  } catch (err: any) {
-    setError(err.message || "Transcription failed");
-  } finally {
-    setIsTranscribing(false);
-    setTranscribeProgress(0);
-  }
-}, [language]);
+    mediaRecorderRef.current.stop();
+    const audioBlob = await blobPromise;
+
+    // Stop the actual mic hardware to turn off the "green light" on the phone
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+
+    try {
+      setIsTranscribing(true);
+      // Use the typed whisper instance here
+      const result = await whisper.transcribe(audioBlob, {
+        language: language.split("-")[0],
+        onProgress: (p: number) => setTranscribeProgress(p), // Fixed 'any' error
+      });
+
+      setTranscript(result.text);
+    } catch (err: any) {
+      setError(err.message || "Transcription failed");
+    } finally {
+      setIsTranscribing(false);
+      setTranscribeProgress(0);
+    }
+  }, [language]);
 
   // ── Public API ───────────────────────────────────────────────────────────
 
