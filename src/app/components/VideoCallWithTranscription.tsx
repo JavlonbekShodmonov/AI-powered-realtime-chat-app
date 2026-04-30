@@ -118,147 +118,55 @@ export default function VideoCallWithTranscription({
   ];
 
   useEffect(() => {
-    if (!token || !containerRef.current) return;
-    if (dailyInstanceCreated) return;
-    dailyInstanceCreated = true;
+  if (!token || !containerRef.current) return;
+  
+  // Use a local variable to prevent race conditions during cleanup
+  let destroyed = false; 
 
-    let destroyed = false;
+  const initializeDaily = async () => {
+    // 1. Clean up ANY existing instance before starting
+    const existingInstance = DailyIframe.getCallInstance();
+    if (existingInstance) {
+      await existingInstance.destroy();
+    }
 
-    const initializeDaily = async () => {
-      if (destroyed) return;
+    if (destroyed || !containerRef.current) return;
 
-      try {
-        // Destroy any existing singleton first
-        const existing = DailyIframe.getCallInstance();
-        if (existing) {
-          console.log("🔪 Destroying existing Daily singleton...");
-          try {
-            await existing.destroy();
-          } catch (_) {}
-          await new Promise((r) => setTimeout(r, 300));
-        }
+    // 2. Create the frame
+    const callFrame = DailyIframe.createFrame(containerRef.current, {
+      iframeStyle: {
+        width: "100%",
+        height: "100%",
+        border: "0",
+        backgroundColor: "#111827",
+      },
+      showLeaveButton: true,
+      userName: displayName,
+    });
 
-        if (destroyed) return;
+    frameRef.current = callFrame;
 
-        if (frameRef.current) {
-          try {
-            frameRef.current.destroy();
-          } catch (_) {}
-          frameRef.current = null;
-          await new Promise((r) => setTimeout(r, 200));
-        }
+    // 3. Join with the specific room URL
+    try {
+      await callFrame.join({ 
+        url: `https://summeet.daily.co/${roomName}`, 
+        token: token 
+      });
+    } catch (e) {
+      console.error("Join error", e);
+    }
+  };
 
-        if (containerRef.current) containerRef.current.innerHTML = "";
-        if (destroyed) return;
+  initializeDaily();
 
-        if (!document.body.contains(containerRef.current)) {
-          console.error("❌ Container not in DOM");
-          dailyInstanceCreated = false;
-          return;
-        }
-
-        console.log("🚀 Creating Daily frame...");
-        const callFrame = DailyIframe.createFrame(containerRef.current!, {
-          iframeStyle: {
-            width: "100%",
-            height: "100%",
-            border: "0",
-            backgroundColor: "#111827",
-          },
-          showLeaveButton: true,
-          showFullscreenButton: true,
-          userName: displayName,
-        });
-
-        if (destroyed) {
-          try {
-            callFrame.destroy();
-          } catch (_) {}
-          return;
-        }
-
-        console.log("✅ Daily frame created");
-        frameRef.current = callFrame;
-
-        callFrame.on("joined-meeting", () => {
-          console.log("📞 Joined meeting");
-          setIsLoading(false);
-        });
-        callFrame.on("left-meeting", () => {
-          console.log("📞 Left meeting");
-          onCloseRef.current?.();
-        });
-        callFrame.on("error", (e: any) => {
-          console.error("📞 Daily frame error:", JSON.stringify(e));
-        });
-        callFrame.on("load-attempt-failed", (e: any) => {
-          console.error("📞 Load attempt failed:", JSON.stringify(e));
-        });
-        callFrame.on("joining-meeting", () => {
-          console.log("📞 Joining meeting (in progress)...");
-        });
-        callFrame.on("access-state-updated", (e: any) => {
-          console.log("📞 Access state:", JSON.stringify(e));
-        });
-
-        const roomUrl = `https://summeet.daily.co/${roomName}`;
-        console.log(
-          "🔗 Joining:",
-          roomUrl,
-          "with token length:",
-          token?.length,
-        );
-
-        try {
-          const joinTimeout = new Promise((_, reject) =>
-            setTimeout(
-              () => reject(new Error("Join timed out after 30s")),
-              30000,
-            ),
-          );
-          await Promise.race([
-            callFrame.join({ url: roomUrl, token }),
-            joinTimeout,
-          ]);
-          console.log("✅ join() resolved");
-        } catch (joinErr: any) {
-          console.error("❌ JOIN FAILED:", joinErr?.message || joinErr);
-          throw joinErr;
-        }
-
-        if (destroyed) return;
-        console.log("✅ Successfully joined Daily room");
-        setIsLoading(false);
-      } catch (err: any) {
-        console.error("❌ Daily initialization error:", err?.message);
-        dailyInstanceCreated = false;
-        if (frameRef.current) {
-          try {
-            frameRef.current.destroy();
-          } catch (_) {}
-          frameRef.current = null;
-        }
-      }
-    };
-
-    initializeDaily();
-
-    return () => {
-      destroyed = true;
-      dailyInstanceCreated = false;
-      console.log("🧹 Cleaning up Daily frame");
-      if (frameRef.current) {
-        try {
-          frameRef.current.destroy();
-          console.log("✅ Frame destroyed");
-        } catch (err) {
-          console.error("⚠️ Error destroying frame:", err);
-        }
-        frameRef.current = null;
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, roomName, displayName]);
+  return () => {
+    destroyed = true;
+    if (frameRef.current) {
+      frameRef.current.destroy();
+      frameRef.current = null;
+    }
+  };
+}, [token, roomName]); // Remove displayName from here to prevent re-joins when user changes name
 
   const getSpeechStatus = () => {
     if (transcriptionError) return `Error: ${transcriptionError}`;
