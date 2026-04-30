@@ -16,7 +16,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import DailyIframe from "@daily-co/daily-js";
-
+import { useTranscription } from "../hooks/useTranscription";
 // Module-level singleton guard — survives re-renders and Strict Mode double-invoke
 let dailyInstanceCreated = false;
 
@@ -53,17 +53,27 @@ export default function VideoCallWithTranscription({
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [callStartTime] = useState(Date.now());
   const [isRecording, setIsRecording] = useState(false);
-  const [speechStatus, setSpeechStatus] = useState("Inactive");
-  const transcriptsEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
   const [selectedLanguage, setSelectedLanguage] = useState("uz-UZ");
-  const isProcessingRef = useRef(false);
-  const restartTimeoutRef = useRef<any>(null);
-  const isRecordingRef = useRef(false);
   const [showMobileWarning, setShowMobileWarning] = useState(true);
+  const transcriptsEndRef = useRef<HTMLDivElement>(null);
+  const isProcessingRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const frameRef = useRef<any>(null);
   const onCloseRef = useRef(onClose);
+  const isRecordingRef = useRef(false);
+
+  // Initialize the new transcription hook with current language
+  const {
+    start: startTranscription,
+    stop: stopTranscription,
+    transcript: liveTranscript,
+    interimTranscript,
+    isListening,
+    isTranscribing,
+    transcribeProgress,
+    error: transcriptionError,
+    isMobileMode,
+  } = useTranscription({ language: selectedLanguage });
   useEffect(() => {
     onCloseRef.current = onClose;
   }, [onClose]);
@@ -122,14 +132,18 @@ export default function VideoCallWithTranscription({
         const existing = DailyIframe.getCallInstance();
         if (existing) {
           console.log("🔪 Destroying existing Daily singleton...");
-          try { await existing.destroy(); } catch (_) {}
+          try {
+            await existing.destroy();
+          } catch (_) {}
           await new Promise((r) => setTimeout(r, 300));
         }
 
         if (destroyed) return;
 
         if (frameRef.current) {
-          try { frameRef.current.destroy(); } catch (_) {}
+          try {
+            frameRef.current.destroy();
+          } catch (_) {}
           frameRef.current = null;
           await new Promise((r) => setTimeout(r, 200));
         }
@@ -157,7 +171,9 @@ export default function VideoCallWithTranscription({
         });
 
         if (destroyed) {
-          try { callFrame.destroy(); } catch (_) {}
+          try {
+            callFrame.destroy();
+          } catch (_) {}
           return;
         }
 
@@ -186,11 +202,19 @@ export default function VideoCallWithTranscription({
         });
 
         const roomUrl = `https://summeet.daily.co/${roomName}`;
-        console.log("🔗 Joining:", roomUrl, "with token length:", token?.length);
+        console.log(
+          "🔗 Joining:",
+          roomUrl,
+          "with token length:",
+          token?.length,
+        );
 
         try {
           const joinTimeout = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("Join timed out after 30s")), 30000),
+            setTimeout(
+              () => reject(new Error("Join timed out after 30s")),
+              30000,
+            ),
           );
           await Promise.race([
             callFrame.join({ url: roomUrl, token }),
@@ -205,12 +229,13 @@ export default function VideoCallWithTranscription({
         if (destroyed) return;
         console.log("✅ Successfully joined Daily room");
         setIsLoading(false);
-
       } catch (err: any) {
         console.error("❌ Daily initialization error:", err?.message);
         dailyInstanceCreated = false;
         if (frameRef.current) {
-          try { frameRef.current.destroy(); } catch (_) {}
+          try {
+            frameRef.current.destroy();
+          } catch (_) {}
           frameRef.current = null;
         }
       }
@@ -235,11 +260,20 @@ export default function VideoCallWithTranscription({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, roomName, displayName]);
 
-  const isMobile = () => {
-    if (typeof window === "undefined") return false;
-    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-      navigator.userAgent,
-    );
+  const getSpeechStatus = () => {
+    if (transcriptionError) return `Error: ${transcriptionError}`;
+    if (isTranscribing && isMobileMode) {
+      return `Processing... ${Math.round(transcribeProgress * 100)}%`;
+    }
+    if (isListening && !isTranscribing) return "Listening...";
+    if (isTranscribing) return "Transcribing...";
+    return "Inactive";
+  };
+
+  const getStatusColor = () => {
+    if (transcriptionError) return "text-red-400";
+    if (isListening || isTranscribing) return "text-green-400";
+    return "text-gray-400";
   };
 
   const uniqueUsers = Array.from(
@@ -304,205 +338,41 @@ export default function VideoCallWithTranscription({
     [roomName, userId, displayName, selectedLanguage],
   );
 
-  const startSpeechRecognition = useCallback(() => {
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
-    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  const startRecording = useCallback(async () => {
+    isRecordingRef.current = true;
+    setIsRecording(true);
+    await startTranscription();
+  }, [startTranscription]);
 
-    if (isIOS || (isSafari && isMobile())) {
-      alert(
-        "⚠️ Speech recognition is not supported on iOS/Safari.\n\nPlease use:\n• Android Chrome browser, or\n• Desktop Chrome/Edge\n\nYou can still see transcripts from other participants!",
-      );
-      setIsRecording(false);
-      isRecordingRef.current = false;
-      setSpeechStatus("Inactive");
-      return;
-    }
-
-    const SpeechRecognition =
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-      alert(
-        "⚠️ Speech recognition is not supported in your browser.\n\nPlease use Chrome or Edge browser.",
-      );
-      setIsRecording(false);
-      isRecordingRef.current = false;
-      setSpeechStatus("Inactive");
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = selectedLanguage;
-    recognition.maxAlternatives = 1;
-
-    let finalTranscript = "";
-
-    recognition.onstart = () => {
-      console.log("✅ Speech recognition started successfully");
-      setSpeechStatus("Listening...");
-    };
-
-    recognition.onresult = async (event: any) => {
-      if (isProcessingRef.current) return;
-
-      try {
-        let interim = "";
-
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          const result = event.results[i];
-          const transcript = result[0].transcript;
-          if (result.isFinal) {
-            finalTranscript += transcript + " ";
-          } else {
-            interim += transcript;
-          }
-        }
-
-        if (interim) {
-          setSpeechStatus(`Hearing: "${interim.substring(0, 30)}..."`);
-        }
-
-        if (finalTranscript.trim().length > 0) {
-          const cleanText = finalTranscript.trim();
-          if (cleanText.length < 3) { finalTranscript = ""; return; }
-          if (/^\d+$/.test(cleanText)) { finalTranscript = ""; return; }
-          const numberRatio = (cleanText.match(/\d/g) || []).length / cleanText.length;
-          if (numberRatio > 0.8) { finalTranscript = ""; return; }
-
-          isProcessingRef.current = true;
-          setSpeechStatus("Saving...");
-          await saveTranscript(cleanText);
-          setSpeechStatus("Listening...");
-          finalTranscript = "";
-          isProcessingRef.current = false;
-        }
-      } catch (error) {
-        console.error("❌ Error processing speech result:", error);
-        isProcessingRef.current = false;
-        setSpeechStatus("Listening...");
-      }
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error("❌ Speech recognition error:", event.error);
-      isProcessingRef.current = false;
-
-      switch (event.error) {
-        case "no-speech":
-          setSpeechStatus("No speech detected");
-          setTimeout(() => {
-            if (isRecordingRef.current) setSpeechStatus("Listening...");
-          }, 2000);
-          break;
-        case "audio-capture":
-          setSpeechStatus("Microphone error");
-          alert("❌ Cannot access microphone.\n\nPlease check microphone permissions.");
-          setIsRecording(false);
-          isRecordingRef.current = false;
-          break;
-        case "not-allowed":
-          setSpeechStatus("Permission denied");
-          alert("❌ Microphone permission denied.\n\nPlease allow microphone access and refresh.");
-          setIsRecording(false);
-          isRecordingRef.current = false;
-          break;
-        case "language-not-supported":
-          setSpeechStatus("Language not supported");
-          alert(`❌ Language "${selectedLanguage}" is not supported by your browser.`);
-          setIsRecording(false);
-          isRecordingRef.current = false;
-          break;
-        case "network":
-        case "aborted":
-          break;
-        default:
-          setSpeechStatus(`Error: ${event.error}`);
-      }
-    };
-
-    recognition.onend = () => {
-      console.log("🎤 Speech recognition ended");
-      isProcessingRef.current = false;
-
-      if (isRecordingRef.current) {
-        console.log("🔄 Auto-restarting recognition...");
-        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
-
-        restartTimeoutRef.current = setTimeout(() => {
-          if (isRecordingRef.current && recognitionRef.current) {
-            try {
-              recognitionRef.current.start();
-            } catch (error: any) {
-              if (!error?.message?.includes("already started")) {
-                console.error("❌ Failed to restart recognition:", error);
-                setIsRecording(false);
-                isRecordingRef.current = false;
-                setSpeechStatus("Inactive");
-              }
-            }
-          }
-        }, 300);
-      } else {
-        setSpeechStatus("Inactive");
-      }
-    };
-
-    recognitionRef.current = recognition;
-
-    try {
-      recognition.start();
-    } catch (error: any) {
-      if (!error?.message?.includes("already started")) {
-        console.error("❌ Failed to start recognition:", error);
-        alert("❌ Failed to start speech recognition.\n\nPlease check microphone permissions and try again.");
-        setIsRecording(false);
-        isRecordingRef.current = false;
-        setSpeechStatus("Error");
-      }
-    }
-  }, [selectedLanguage, saveTranscript]);
-
-  const stopSpeechRecognition = useCallback(() => {
-    if (restartTimeoutRef.current) {
-      clearTimeout(restartTimeoutRef.current);
-      restartTimeoutRef.current = null;
-    }
-
+  const stopRecording = useCallback(async () => {
     isRecordingRef.current = false;
     setIsRecording(false);
-    isProcessingRef.current = false;
 
-    if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-        recognitionRef.current = null;
-      } catch (error) {
-        console.error("❌ Error stopping recognition:", error);
-      }
+    // On mobile, this triggers the Whisper transcription and waits for it
+    await stopTranscription();
+  }, [stopTranscription]);
+
+  // Auto-save transcript when it becomes available after stopping on mobile
+  useEffect(() => {
+    if (!isRecording && liveTranscript && liveTranscript.trim().length > 2) {
+      saveTranscript(liveTranscript);
     }
-
-    setSpeechStatus("Inactive");
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTranscript]);
 
   const toggleRecording = useCallback(() => {
     if (isRecordingRef.current) {
-      stopSpeechRecognition();
+      stopRecording();
     } else {
-      isRecordingRef.current = true;
-      setIsRecording(true);
-      setSpeechStatus("Starting...");
-      setTimeout(() => startSpeechRecognition(), 100);
+      startRecording();
     }
-  }, [startSpeechRecognition, stopSpeechRecognition]);
+  }, [startRecording, stopRecording]);
 
   useEffect(() => {
     return () => {
-      stopSpeechRecognition();
+      stopRecording();
     };
-  }, [stopSpeechRecognition]);
+  }, [stopRecording]);
 
   const generateSummary = async () => {
     setLoadingSummary(true);
@@ -531,7 +401,9 @@ export default function VideoCallWithTranscription({
       const data = await response.json();
 
       if (selectedUser) {
-        setUserSummary(data.userSummary || "No summary available for this user.");
+        setUserSummary(
+          data.userSummary || "No summary available for this user.",
+        );
       } else {
         setSummary(data.fullSummary || "No summary available.");
       }
@@ -569,15 +441,6 @@ export default function VideoCallWithTranscription({
     alert("Summary copied to clipboard!");
   };
 
-  const getStatusColor = () => {
-    if (speechStatus.includes("Listening") || speechStatus.includes("Starting") || speechStatus.includes("Hearing"))
-      return "text-green-400";
-    if (speechStatus.includes("Processing") || speechStatus.includes("Saving"))
-      return "text-blue-400";
-    if (speechStatus.includes("Error")) return "text-red-400";
-    return "text-gray-400";
-  };
-
   return (
     <div className="relative w-full h-screen bg-gray-900 flex">
       {/* Video Area */}
@@ -598,16 +461,15 @@ export default function VideoCallWithTranscription({
 
         <div ref={containerRef} className="w-full h-full border-0" />
 
-        {isMobile() && showMobileWarning && (
+        {isMobileMode && showMobileWarning && (
           <div className="absolute top-4 left-4 right-4 md:left-auto md:right-20 max-w-md z-50">
-            <div className="bg-yellow-400 text-gray-900 px-4 py-3 rounded-lg shadow-xl border-2 border-yellow-500">
+            <div className="bg-blue-400 text-gray-900 px-4 py-3 rounded-lg shadow-xl border-2 border-blue-500">
               <div className="flex items-start gap-3">
-                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-yellow-800" />
+                <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5 text-blue-800" />
                 <div className="flex-1">
                   <p className="font-bold text-sm mb-1">📱 Mobile Device</p>
                   <p className="text-xs leading-relaxed">
-                    AI transcription works best on desktop Chrome/Edge. On
-                    mobile, you can still view others' transcripts!
+                    📊 Now using AI transcription on mobile! Transcripts will be processed on-device using browser-whisper (no API key needed).
                   </p>
                 </div>
                 <button
@@ -631,13 +493,8 @@ export default function VideoCallWithTranscription({
               onChange={(e) => {
                 setSelectedLanguage(e.target.value);
                 if (isRecordingRef.current) {
-                  stopSpeechRecognition();
-                  setTimeout(() => {
-                    isRecordingRef.current = true;
-                    setIsRecording(true);
-                    setSpeechStatus("Starting...");
-                    setTimeout(() => startSpeechRecognition(), 100);
-                  }, 300);
+                  stopRecording();
+                  setTimeout(() => startRecording(), 500);
                 }
               }}
               className="bg-transparent text-white text-sm border-none focus:outline-none cursor-pointer pr-6"
@@ -650,7 +507,11 @@ export default function VideoCallWithTranscription({
               }}
             >
               {LANGUAGES.map((lang) => (
-                <option key={lang.code} value={lang.code} className="bg-gray-800">
+                <option
+                  key={lang.code}
+                  value={lang.code}
+                  className="bg-gray-800"
+                >
                   {lang.flag} {lang.name}
                 </option>
               ))}
@@ -666,8 +527,10 @@ export default function VideoCallWithTranscription({
             >
               {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
             </button>
-            <span className={`text-xs font-semibold ${getStatusColor()} bg-gray-900/80 px-2 py-1 rounded whitespace-nowrap`}>
-              {speechStatus}
+            <span
+              className={`text-xs font-semibold ${getStatusColor()} bg-gray-900/80 px-2 py-1 rounded whitespace-nowrap`}
+            >
+              {getSpeechStatus()}
             </span>
           </div>
 
@@ -726,7 +589,9 @@ export default function VideoCallWithTranscription({
                   button to start
                 </p>
                 <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-left">
-                  <p className="text-xs"><strong>💡 How it works:</strong></p>
+                  <p className="text-xs">
+                    <strong>💡 How it works:</strong>
+                  </p>
                   <ul className="text-xs mt-1 space-y-1 ml-4 list-disc">
                     <li>Your browser listens to your voice</li>
                     <li>Converts speech to text</li>
@@ -734,7 +599,9 @@ export default function VideoCallWithTranscription({
                     <li>Generate AI summary anytime</li>
                   </ul>
                   <div className="mt-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded border border-yellow-200 dark:border-yellow-700">
-                    <p className="text-xs font-semibold text-yellow-800 dark:text-yellow-300">📱 Device Support:</p>
+                    <p className="text-xs font-semibold text-yellow-800 dark:text-yellow-300">
+                      📱 Device Support:
+                    </p>
                     <ul className="text-xs mt-1 space-y-1 text-yellow-700 dark:text-yellow-400">
                       <li>✅ Android Chrome</li>
                       <li>✅ Desktop Chrome/Edge</li>
@@ -742,7 +609,11 @@ export default function VideoCallWithTranscription({
                     </ul>
                   </div>
                   <button
-                    onClick={() => saveTranscript("This is a test message to verify the system is working")}
+                    onClick={() =>
+                      saveTranscript(
+                        "This is a test message to verify the system is working",
+                      )
+                    }
                     className="mt-2 w-full px-3 py-2 bg-blue-500 hover:bg-blue-600 text-white text-xs rounded transition-colors"
                   >
                     🧪 Test Transcript Save
@@ -780,14 +651,20 @@ export default function VideoCallWithTranscription({
       {/* Summary Modal */}
       {showSummary && (
         <>
-          <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={() => setShowSummary(false)} />
+          <div
+            className="fixed inset-0 bg-black bg-opacity-50 z-40"
+            onClick={() => setShowSummary(false)}
+          />
           <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                 <Sparkles className="w-6 h-6 text-purple-600" />
                 Video Call Summary
               </h3>
-              <button onClick={() => setShowSummary(false)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+              <button
+                onClick={() => setShowSummary(false)}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              >
                 <X size={24} />
               </button>
             </div>
@@ -795,12 +672,17 @@ export default function VideoCallWithTranscription({
             {!summary && !userSummary && !loadingSummary && (
               <div className="text-center py-8">
                 <Sparkles className="w-16 h-16 mx-auto mb-4 text-purple-300" />
-                <p className="text-gray-600 dark:text-gray-400 mb-2">Generate an AI-powered summary of your video call</p>
+                <p className="text-gray-600 dark:text-gray-400 mb-2">
+                  Generate an AI-powered summary of your video call
+                </p>
                 <p className="text-sm text-gray-500 dark:text-gray-500 mb-6">
-                  {transcripts.length} statements captured from {uniqueUsers.length} participants
+                  {transcripts.length} statements captured from{" "}
+                  {uniqueUsers.length} participants
                 </p>
                 <div className="mb-6 max-w-xs mx-auto">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Summarize:</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Summarize:
+                  </label>
                   <select
                     value={selectedUser || ""}
                     onChange={(e) => setSelectedUser(e.target.value || null)}
@@ -808,7 +690,9 @@ export default function VideoCallWithTranscription({
                   >
                     <option value="">Full Conversation</option>
                     {uniqueUsers.map((user) => (
-                      <option key={user.id} value={user.id}>{user.name}'s contributions</option>
+                      <option key={user.id} value={user.id}>
+                        {user.name}'s contributions
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -826,7 +710,9 @@ export default function VideoCallWithTranscription({
             {loadingSummary && (
               <div className="text-center py-12">
                 <Loader2 className="w-16 h-16 mx-auto mb-4 text-purple-600 animate-spin" />
-                <p className="text-gray-600 dark:text-gray-400">Analyzing conversation and generating summary...</p>
+                <p className="text-gray-600 dark:text-gray-400">
+                  Analyzing conversation and generating summary...
+                </p>
               </div>
             )}
 
@@ -837,7 +723,8 @@ export default function VideoCallWithTranscription({
                     <div className="flex items-center gap-2 mb-3 pb-3 border-b border-purple-200 dark:border-purple-700">
                       <Users size={18} className="text-purple-600" />
                       <span className="font-semibold text-purple-700 dark:text-purple-300">
-                        {uniqueUsers.find((u) => u.id === selectedUser)?.name}'s Summary
+                        {uniqueUsers.find((u) => u.id === selectedUser)?.name}'s
+                        Summary
                       </span>
                     </div>
                   )}
@@ -846,13 +733,25 @@ export default function VideoCallWithTranscription({
                   </p>
                 </div>
                 <div className="flex gap-3">
-                  <button onClick={copySummary} className="flex-1 px-4 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2">
+                  <button
+                    onClick={copySummary}
+                    className="flex-1 px-4 py-3 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-900 dark:text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2"
+                  >
                     <Copy size={18} /> Copy
                   </button>
-                  <button onClick={downloadSummary} className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2">
+                  <button
+                    onClick={downloadSummary}
+                    className="flex-1 px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium flex items-center justify-center gap-2"
+                  >
                     <Download size={18} /> Download
                   </button>
-                  <button onClick={() => { setSummary(""); setUserSummary(""); }} className="flex-1 px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors font-medium">
+                  <button
+                    onClick={() => {
+                      setSummary("");
+                      setUserSummary("");
+                    }}
+                    className="flex-1 px-4 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors font-medium"
+                  >
                     🔄 New Summary
                   </button>
                 </div>
@@ -860,7 +759,9 @@ export default function VideoCallWithTranscription({
             )}
 
             <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-              <p className="text-xs text-gray-600 dark:text-gray-400"><strong>💡 Tips:</strong></p>
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                <strong>💡 Tips:</strong>
+              </p>
               <ul className="text-xs text-gray-600 dark:text-gray-400 mt-1 ml-4 list-disc space-y-1">
                 <li>Click mic button before speaking to capture your voice</li>
                 <li>Works 100% in browser — no uploads needed!</li>

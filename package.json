@@ -17,6 +17,7 @@
     "@deepgram/sdk": "^4.11.3",
     "@google/genai": "^1.12.0",
     "axios": "^1.11.0",
+    "browser-whisper": "^1.0.1",
     "class-variance-authority": "^0.7.1",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
