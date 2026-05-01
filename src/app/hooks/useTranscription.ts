@@ -2,6 +2,8 @@
 // Desktop → Web Speech API (unchanged, real-time)
 // Mobile  → MediaRecorder + browser-whisper WASM (free, on-device, no API key)
 // Force client-side only
+'use client';
+
 if (typeof window === 'undefined') {
   throw new Error('useTranscription must be used client-side only');
 }
