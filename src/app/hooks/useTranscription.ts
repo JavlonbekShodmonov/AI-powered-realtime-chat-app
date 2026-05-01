@@ -167,23 +167,43 @@ export function useTranscription({ language = "en-US" } = {}) {
 
     try {
       setIsTranscribing(true);
-      const { WhisperTranscriber } = await import("whisper-web-transcriber");
-      const transcriber = new WhisperTranscriber({
-        modelSize: "tiny-en-q5_1",
-        onTranscription: (text: string) => {
-          setTranscript((prev) => prev + " " + text);
-        },
-      });
+      setTranscribeProgress(0.2);
 
-      await transcriber.loadModel();
+      const groqApiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY;
+      if (!groqApiKey) throw new Error("GROQ_API_KEY not set");
 
-      console.log(
-        Object.getOwnPropertyNames(Object.getPrototypeOf(transcriber)),
-      );
-      const file = new File([audioBlob], "recording.webm", {
+      const ext = audioBlob.type.includes("mp4") ? "mp4" : "webm";
+      const file = new File([audioBlob], `recording.${ext}`, {
         type: audioBlob.type,
       });
-      await (transcriber as any).transcribeFile(file); // cast to any to bypass TS error for now
+
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("model", "whisper-large-v3-turbo");
+      formData.append("language", language.split("-")[0]);
+      formData.append("response_format", "json");
+
+      setTranscribeProgress(0.5);
+
+      const res = await fetch(
+        "https://api.groq.com/openai/v1/audio/transcriptions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${groqApiKey}`,
+          },
+          body: formData,
+        },
+      );
+
+      if (!res.ok) {
+        const err = await res.text();
+        throw new Error(`Groq error: ${err}`);
+      }
+
+      const data = await res.json();
+      setTranscribeProgress(1);
+      setTranscript(data.text ?? "");
     } catch (err: any) {
       setError(err.message || "Transcription failed");
     } finally {

@@ -9,7 +9,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <Script src="/coi-serviceworker.js" strategy="beforeInteractive" />
         <LocaleProvider>
           <Provider>
             <Navbar />
