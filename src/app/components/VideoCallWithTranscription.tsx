@@ -117,54 +117,53 @@ export default function VideoCallWithTranscription({
     { code: "az-AZ", name: "Azərbaycan dili", flag: "🇦🇿" },
   ];
 
- useEffect(() => {
-  if (!token || !containerRef.current) return;
+  useEffect(() => {
+    if (!token || !containerRef.current) return;
 
-  let callFrame: any = null;
+    let callFrame: any = null;
+    let cancelled = false;
 
-  const startCall = async () => {
-    // 1. CLEAR EVERYTHING first - Total reset
-    if (DailyIframe.getCallInstance()) {
-      await DailyIframe.getCallInstance()?.destroy();
-    }
-    containerRef.current!.innerHTML = "";
+    const startCall = async () => {
+      // Safely destroy any existing instance first
+      try {
+        const existing = DailyIframe.getCallInstance();
+        if (existing) await existing.destroy();
+      } catch (_) {}
 
-    // 2. FORCE PERMISSIONS manually on the container
-    // This is the "Magic Sauce" that prevents the chrome-error block
-    containerRef.current!.setAttribute(
-      "allow",
-      "camera; microphone; display-capture; autoplay; clipboard-write"
-    );
+      if (cancelled) return;
 
-    // 3. Use createFrame with the specific URL immediately
-    // Don't wait for a second .join() call; put the URL in the config
-    callFrame = DailyIframe.createFrame(containerRef.current!, {
-      url: `https://summeet.daily.co/${roomName}`,
-      token: token,
-      showLeaveButton: true,
-      iframeStyle: {
-        width: "100%",
-        height: "100%",
-        border: "0",
-      },
-    });
+      // Clear container only after destroy
+      if (containerRef.current) containerRef.current.innerHTML = "";
 
-    // 4. Standard Join
-    try {
-      await callFrame.join();
-    } catch (e) {
-      console.error("Daily join error:", e);
-    }
-  };
+      callFrame = DailyIframe.createFrame(containerRef.current!, {
+        url: `https://summeet.daily.co/${roomName}`,
+        token: token,
+        showLeaveButton: true,
+        iframeStyle: {
+          width: "100%",
+          height: "100%",
+          border: "0",
+        },
+      });
 
-  startCall();
+      callFrame.on("loaded", () => setIsLoading(false));
+      callFrame.on("join-meeting", () => setIsLoading(false));
+      callFrame.on("error", (e: any) => console.error("Daily error:", e));
 
-  return () => {
-    if (callFrame) {
-      callFrame.destroy();
-    }
-  };
-}, [token, roomName]); // ONLY these two. Do NOT include any UI state here.
+      try {
+        if (!cancelled) await callFrame.join();
+      } catch (e) {
+        console.error("Daily join error:", e);
+      }
+    };
+
+    startCall();
+
+    return () => {
+      cancelled = true;
+      callFrame?.destroy().catch(() => {});
+    };
+  }, [token, roomName]); // ONLY these two. Do NOT include any UI state here.
   const getSpeechStatus = () => {
     if (transcriptionError) return `Error: ${transcriptionError}`;
     if (isTranscribing && isMobileMode) {
