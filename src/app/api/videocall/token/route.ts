@@ -44,7 +44,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         name: sanitizedRoomName,
         properties: {
-          exp: Math.floor(Date.now() / 1000) + 3600,
+          exp: Math.floor(Date.now() / 1000) + 1800,
           eject_at_room_exp: true,
           enable_chat: true,
           enable_prejoin_ui: false,
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
           },
           body: JSON.stringify({
             properties: {
-              exp: Math.floor(Date.now() / 1000) + 3600,
+              exp: Math.floor(Date.now() / 1000) + 1800,
               eject_at_room_exp: true,
               enable_prejoin_ui: false,
             },
@@ -108,7 +108,7 @@ export async function POST(request: Request) {
         properties: {
           room_name: sanitizedRoomName,
           is_owner: true,
-          exp: Math.floor(Date.now() / 1000) + 3600,
+          exp: Math.floor(Date.now() / 1000) + 1800,
           enable_prejoin_ui: false,
         },
       }),

@@ -18,7 +18,6 @@ import {
 import DailyIframe from "@daily-co/daily-js";
 import { useTranscription } from "../hooks/useTranscription";
 // Module-level singleton guard — survives re-renders and Strict Mode double-invoke
-let dailyInstanceCreated = false;
 
 interface Transcript {
   _id: string;
@@ -61,7 +60,11 @@ export default function VideoCallWithTranscription({
   const frameRef = useRef<any>(null);
   const onCloseRef = useRef(onClose);
   const isRecordingRef = useRef(false);
-
+  const CALL_DURATION_MS = 30 * 60 * 1000; // 30 minutes
+  const [timeRemaining, setTimeRemaining] = useState(CALL_DURATION_MS);
+  const [showWarningBanner, setShowWarningBanner] = useState(false);
+  const warningFiredRef = useRef(false);
+  const urgentWarningFiredRef = useRef(false);
   // Initialize the new transcription hook with current language
   const {
     start: startTranscription,
@@ -173,6 +176,11 @@ export default function VideoCallWithTranscription({
     if (isTranscribing) return "Transcribing...";
     return "Inactive";
   };
+  const formatTimeRemaining = () => {
+    const mins = Math.floor(timeRemaining / 60000);
+    const secs = Math.floor((timeRemaining % 60000) / 1000);
+    return `${mins}:${secs.toString().padStart(2, "0")}`;
+  };
 
   const getStatusColor = () => {
     if (transcriptionError) return "text-red-400";
@@ -277,6 +285,37 @@ export default function VideoCallWithTranscription({
       stopRecording();
     };
   }, [stopRecording]);
+
+  useEffect(() => {
+    if (!token) return;
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - callStartTime;
+      const remaining = CALL_DURATION_MS - elapsed;
+
+      setTimeRemaining(Math.max(0, remaining));
+
+      // 5-minute warning (at 25 min)
+      if (remaining <= 5 * 60 * 1000 && !warningFiredRef.current) {
+        warningFiredRef.current = true;
+        alert("⚠️ Your call will end in 5 minutes.");
+      }
+
+      // 1-minute urgent banner (at 29 min)
+      if (remaining <= 60 * 1000 && !urgentWarningFiredRef.current) {
+        urgentWarningFiredRef.current = true;
+        setShowWarningBanner(true);
+      }
+
+      // Kick at exactly 30 min
+      if (remaining <= 0) {
+        clearInterval(interval);
+        onCloseRef.current?.();
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [token, callStartTime]);
 
   const generateSummary = async () => {
     setLoadingSummary(true);
@@ -391,6 +430,18 @@ export default function VideoCallWithTranscription({
 
         {/* Control Buttons */}
         <div className="absolute top-4 right-4 flex gap-2 flex-wrap max-w-md">
+          <div
+            className={`flex items-center gap-2 px-3 py-2 rounded-full text-white text-sm font-mono font-bold
+  ${
+    timeRemaining <= 60000
+      ? "bg-red-600 animate-pulse"
+      : timeRemaining <= 300000
+        ? "bg-yellow-500"
+        : "bg-gray-900/80"
+  }`}
+          >
+            ⏱ {formatTimeRemaining()}
+          </div>
           {/* Language Selector */}
           <div className="flex items-center gap-2 bg-gray-900/80 px-3 py-2 rounded-full">
             <span className="text-white text-xs font-semibold">🌍</span>
@@ -466,6 +517,18 @@ export default function VideoCallWithTranscription({
             </button>
           )}
         </div>
+        {showWarningBanner && (
+          <div className="absolute bottom-20 left-1/2 -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-pulse">
+            <AlertCircle size={20} />
+            <span className="font-bold">Call ending in 1 minute!</span>
+            <button
+              onClick={() => setShowWarningBanner(false)}
+              className="ml-2 opacity-70 hover:opacity-100"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Transcript Sidebar */}
