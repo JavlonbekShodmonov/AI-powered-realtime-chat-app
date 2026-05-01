@@ -2,10 +2,10 @@
 // Desktop → Web Speech API (unchanged, real-time)
 // Mobile  → MediaRecorder + browser-whisper WASM (free, on-device, no API key)
 // Force client-side only
-'use client';
+"use client";
 
-if (typeof window === 'undefined') {
-  throw new Error('useTranscription must be used client-side only');
+if (typeof window === "undefined") {
+  throw new Error("useTranscription must be used client-side only");
 }
 import { useRef, useState, useCallback, useEffect } from "react";
 interface WhisperModule {
@@ -168,8 +168,8 @@ export function useTranscription({ language = "en-US" } = {}) {
     try {
       setIsTranscribing(true);
 
-      const { pipeline } = await import("@xenova/transformers");
-
+      const transformers = await import("@xenova/transformers");
+      const { pipeline } = transformers;
       // Converts blob to array buffer → float32 array for the model
       const arrayBuffer = await audioBlob.arrayBuffer();
       const audioContext = new AudioContext({ sampleRate: 16000 });
