@@ -3,8 +3,6 @@
 // Mobile  → MediaRecorder + browser-whisper WASM (free, on-device, no API key)
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import * as whisperImport from "browser-whisper";
-// Define the shape of the whisper module for TypeScript
 interface WhisperModule {
   transcribe: (
     audio: Blob | Float32Array,
@@ -14,10 +12,6 @@ interface WhisperModule {
     },
   ) => Promise<{ text: string }>;
 }
-
-// Cast the import to the defined interface
-const whisper = whisperImport as unknown as WhisperModule;
-// ─── helpers ───────────────────────────────────────────────────────────────
 
 const isMobile = () =>
   /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(
@@ -66,7 +60,7 @@ export function useTranscription({ language = "en-US" } = {}) {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const streamRef = useRef<MediaStream | null>(null);
-
+  const isRecordingRef = useRef(false); // To track if we should be listening (handles auto-restarts)
   // ── Desktop: Web Speech API ──────────────────────────────────────────────
 
   const startDesktop = useCallback(() => {
@@ -94,8 +88,14 @@ export function useTranscription({ language = "en-US" } = {}) {
       setIsListening(false);
     };
 
-    recognition.onend = () => setIsListening(false);
-
+    recognition.onend = () => {
+      // If we're still supposed to be listening, restart (handles aborts)
+      if (isRecordingRef.current) {
+        recognition.start();
+      } else {
+        setIsListening(false);
+      }
+    };
     recognitionRef.current = recognition;
     recognition.start();
     setIsListening(true);
@@ -157,20 +157,26 @@ export function useTranscription({ language = "en-US" } = {}) {
     streamRef.current?.getTracks().forEach((track) => track.stop());
 
     try {
-      setIsTranscribing(true);
-      // Use the typed whisper instance here
-      const result = await whisper.transcribe(audioBlob, {
-        language: language.split("-")[0],
-        onProgress: (p: number) => setTranscribeProgress(p), // Fixed 'any' error
-      });
+  setIsTranscribing(true);
+  const { BrowserWhisper } = await import("browser-whisper");
+  const whisper = new BrowserWhisper();
+  const file = new File([audioBlob], "recording.webm", { type: audioBlob.type });
 
-      setTranscript(result.text);
-    } catch (err: any) {
-      setError(err.message || "Transcription failed");
-    } finally {
-      setIsTranscribing(false);
-      setTranscribeProgress(0);
-    }
+  const stream = await whisper.transcribe(file, {
+    onProgress: ({ stage, progress }: { stage: string; progress: number }) => {
+      setTranscribeProgress(progress ?? 0);
+    },
+  });
+
+  const segments = await stream.collect();
+  const fullText = segments.map((s: { text: string }) => s.text).join(" ").trim();
+  setTranscript(fullText);
+} catch (err: any) {
+  setError(err.message || "Transcription failed");
+} finally {
+  setIsTranscribing(false);
+  setTranscribeProgress(0);
+}
   }, [language]);
 
   // ── Public API ───────────────────────────────────────────────────────────
