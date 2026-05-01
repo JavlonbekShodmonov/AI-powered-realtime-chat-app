@@ -1,7 +1,10 @@
 // hooks/useTranscription.ts
 // Desktop → Web Speech API (unchanged, real-time)
 // Mobile  → MediaRecorder + browser-whisper WASM (free, on-device, no API key)
-
+// Force client-side only
+if (typeof window === 'undefined') {
+  throw new Error('useTranscription must be used client-side only');
+}
 import { useRef, useState, useCallback, useEffect } from "react";
 interface WhisperModule {
   transcribe: (
