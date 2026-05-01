@@ -16,9 +16,7 @@
     "@daily-co/daily-react-hooks": "^0.5.0",
     "@deepgram/sdk": "^4.11.3",
     "@google/genai": "^1.12.0",
-    "@xenova/transformers": "^2.17.2",
     "axios": "^1.11.0",
-    "browser-whisper": "^1.0.1",
     "class-variance-authority": "^0.7.1",
     "dotenv": "^17.2.3",
     "express": "^5.2.1",
@@ -37,7 +35,8 @@
     "socket.io-client": "^4.8.1",
     "tailwind-merge": "^3.4.0",
     "uuid": "^11.1.0",
-    "web-push": "^3.6.7"
+    "web-push": "^3.6.7",
+    "whisper-web-transcriber": "^0.2.5"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

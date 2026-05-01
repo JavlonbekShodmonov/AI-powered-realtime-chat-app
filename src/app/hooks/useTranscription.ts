@@ -167,33 +167,30 @@ export function useTranscription({ language = "en-US" } = {}) {
 
     try {
       setIsTranscribing(true);
-
-      const transformers = await import("@xenova/transformers");
-      const { pipeline } = transformers;
-      // Converts blob to array buffer → float32 array for the model
-      const arrayBuffer = await audioBlob.arrayBuffer();
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-      const float32Audio = audioBuffer.getChannelData(0);
-
-      const transcriber = await pipeline(
-        "automatic-speech-recognition",
-        "Xenova/whisper-tiny",
-        {
-          progress_callback: (p: any) =>
-            setTranscribeProgress(p.progress / 100),
+      const { WhisperTranscriber } = await import("whisper-web-transcriber");
+      const transcriber = new WhisperTranscriber({
+        modelSize: "tiny-en-q5_1",
+        onTranscription: (text: string) => {
+          setTranscript((prev) => prev + " " + text);
         },
-      );
+      });
 
-      const result = (await transcriber(float32Audio)) as { text: string };
-      setTranscript(result.text.trim());
+      await transcriber.loadModel();
+
+      console.log(
+        Object.getOwnPropertyNames(Object.getPrototypeOf(transcriber)),
+      );
+      const file = new File([audioBlob], "recording.webm", {
+        type: audioBlob.type,
+      });
+      await (transcriber as any).transcribeFile(file); // cast to any to bypass TS error for now
     } catch (err: any) {
       setError(err.message || "Transcription failed");
     } finally {
       setIsTranscribing(false);
       setTranscribeProgress(0);
     }
-  }, [language]);
+  }, [language]); // ← this closes stopMobile
 
   // ── Public API ───────────────────────────────────────────────────────────
 
@@ -205,8 +202,6 @@ export function useTranscription({ language = "en-US" } = {}) {
     else startMobile();
   }, [startDesktop, startMobile]);
 
-  // Always safe to await — resolves immediately on desktop,
-  // resolves after Whisper finishes on mobile.
   const stop = useCallback(() => {
     if (webSpeechSupported()) {
       stopDesktop();
