@@ -84,10 +84,14 @@ export function useTranscription({ language = "en-US" } = {}) {
     };
 
     recognition.onerror = (e: any) => {
+      // 'aborted' is non-fatal — just restart if we're still supposed to be listening
+      if (e.error === "aborted" && isRecordingRef.current) {
+        recognition.start();
+        return;
+      }
       setError(`Speech recognition error: ${e.error}`);
       setIsListening(false);
     };
-
     recognition.onend = () => {
       // If we're still supposed to be listening, restart (handles aborts)
       if (isRecordingRef.current) {
@@ -157,26 +161,33 @@ export function useTranscription({ language = "en-US" } = {}) {
     streamRef.current?.getTracks().forEach((track) => track.stop());
 
     try {
-  setIsTranscribing(true);
-  const { BrowserWhisper } = await import("browser-whisper");
-  const whisper = new BrowserWhisper();
-  const file = new File([audioBlob], "recording.webm", { type: audioBlob.type });
+      setIsTranscribing(true);
 
-  const stream = await whisper.transcribe(file, {
-    onProgress: ({ stage, progress }: { stage: string; progress: number }) => {
-      setTranscribeProgress(progress ?? 0);
-    },
-  });
+      const { pipeline } = await import("@xenova/transformers");
 
-  const segments = await stream.collect();
-  const fullText = segments.map((s: { text: string }) => s.text).join(" ").trim();
-  setTranscript(fullText);
-} catch (err: any) {
-  setError(err.message || "Transcription failed");
-} finally {
-  setIsTranscribing(false);
-  setTranscribeProgress(0);
-}
+      // Converts blob to array buffer → float32 array for the model
+      const arrayBuffer = await audioBlob.arrayBuffer();
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+      const float32Audio = audioBuffer.getChannelData(0);
+
+      const transcriber = await pipeline(
+        "automatic-speech-recognition",
+        "Xenova/whisper-tiny",
+        {
+          progress_callback: (p: any) =>
+            setTranscribeProgress(p.progress / 100),
+        },
+      );
+
+      const result = (await transcriber(float32Audio)) as { text: string };
+      setTranscript(result.text.trim());
+    } catch (err: any) {
+      setError(err.message || "Transcription failed");
+    } finally {
+      setIsTranscribing(false);
+      setTranscribeProgress(0);
+    }
   }, [language]);
 
   // ── Public API ───────────────────────────────────────────────────────────
