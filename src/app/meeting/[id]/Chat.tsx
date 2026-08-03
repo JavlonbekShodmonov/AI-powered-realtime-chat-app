@@ -1,997 +1,185 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import io, { Socket } from "socket.io-client";
-import { useSession } from "next-auth/react";
-import "next-auth";
-import AISuggestionsPanel from "../../components/ui/AISuggestionsPanel";
-import React from "react";
-import { useLocale } from "../../components/provider/locale-provider";
-import VideoChatButton from "../../components/VideoChatButton";
-import CallNotification from "../../components/CallNotification";
-import dynamic from "next/dynamic";
+import { useState, useEffect, useRef } from "react";
+import { Send } from "lucide-react";
 
-const VideoCallWithTranscription = dynamic(
-  () => import("@/app/components/VideoCallWithTranscription"),
-  { ssr: false }
-);// FIX 3: Removed unused `DailyIframe` import — it caused a build error and
-// is not needed in this file (Daily is only used inside VideoCallWithTranscription).
+interface Message {
+  _id?: string;
+  id?: string;
+  content?: string;
+  text?: string;
+  senderId: string;
+  senderName?: string;
+  sender?: { name: string };
+  createdAt?: Date | number;
+  timestamp?: number;
+  type?: string;
+}
 
-declare module "next-auth" {
-  interface Session {
-    user: {
-      id?: string;
-      name?: string | null;
-      email?: string | null;
-      image?: string | null;
+interface ChatProps {
+  meetingId: string;
+  userId: string;
+  userName: string;
+  socket: any;
+}
+
+export default function Chat({ meetingId, userId, userName, socket }: ChatProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputMessage, setInputMessage] = useState("");
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Normalize message shape regardless of source
+  function normalize(msg: Message) {
+    return {
+      id: msg._id || msg.id || Math.random().toString(36).slice(2),
+      senderId: msg.senderId,
+      senderName: msg.senderName || msg.sender?.name || "Anonymous",
+      text: msg.content || msg.text || "",
+      timestamp: msg.createdAt
+        ? typeof msg.createdAt === "number"
+          ? msg.createdAt
+          : new Date(msg.createdAt).getTime()
+        : msg.timestamp || Date.now(),
     };
   }
-}
 
-type ChatProps = {
-  roomId: string;
-};
-
-interface IncomingCall {
-  callerName: string;
-  meetingId: string;
-}
-
-export default function Chat({ roomId }: ChatProps) {
-  const { data: session, status } = useSession();
-  const { locale } = useLocale();
-  const router = useRouter();
-  const [showAIHelper, setShowAIHelper] = useState(true);
-  const [showEmbeddedCall, setShowEmbeddedCall] = useState(false);
-  const [callStartTime, setCallStartTime] = useState<number | null>(null);
-  const [messages, setMessages] = useState<any[]>([]);
-  const [newMessage, setNewMessage] = useState("");
-  const [summary, setSummary] = useState("");
-  const [loadingSummary, setLoadingSummary] = useState(false);
-  const [onlineUsers, setOnlineUsers] = useState<
-    { id: string; name: string }[]
-  >([]);
-  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
-  const [incomingCall, setIncomingCall] = useState<IncomingCall | null>(null);
-  const [isSummaryPanelOpen, setIsSummaryPanelOpen] = useState(false);
-  const [summaryPanelWidth, setSummaryPanelWidth] = useState(320);
-  const socketRef = useRef<Socket | null>(null);
-  const currentRoomRef = useRef<string | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const resizeRef = useRef<HTMLDivElement>(null);
-  const [callToken, setCallToken] = useState<string | null>(null);
-  // FIX 4: Track which room name was used when the token was fetched, so we
-  // pass the exact same name to VideoCallWithTranscription (roomName prop).
-  const [activeCallRoomName, setActiveCallRoomName] = useState<string | null>(
-    null,
-  );
-
-  console.log("Chat render state:", {
-    showEmbeddedCall,
-    callToken,
-    activeCallRoomName,
-  });
-  // Auto-scroll when messages update
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const distanceFromBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight;
-    if (distanceFromBottom < 100) {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
+    if (!socket) return;
+
+    // Load initial messages when joining room
+    socket.on("initialMessages", (msgs: Message[]) => {
+      setMessages(msgs.map(normalize));
+    });
+
+    // New message from any user in the room
+    socket.on("newMessage", (msg: Message) => {
+      setMessages((prev) => {
+        const normalized = normalize(msg);
+        // Avoid duplicates (optimistic update already added it)
+        const exists = prev.some((m) => m.id === normalized.id);
+        return exists ? prev : [...prev, normalized];
+      });
+    });
+
+    socket.on("messageEdited", (msg: Message) => {
+      setMessages((prev) =>
+        prev.map((m) => {
+          const id = msg._id || msg.id;
+          return m.id === id ? { ...m, text: msg.content || msg.text || m.text } : m;
+        })
+      );
+    });
+
+    socket.on("messageDeleted", (messageId: string) => {
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    });
+
+    return () => {
+      socket.off("initialMessages");
+      socket.off("newMessage");
+      socket.off("messageEdited");
+      socket.off("messageDeleted");
+    };
+  }, [socket]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // Socket initialization (only once)
-  useEffect(() => {
-    if (status !== "authenticated" || !session?.user?.id) return;
-    if (socketRef.current?.connected) return;
+  const handleSendMessage = () => {
+    if (!inputMessage.trim() || !socket) return;
 
-    const base =
-      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
-    const socket = io(base, {
-      path: "/socket.io",
-      transports: ["websocket"],
-      auth: {
-        userId: session.user.id.toString(),
-        userName: session.user.name || "Anonymous",
-      },
+    // Optimistic update
+    const optimistic = {
+      id: `temp-${Date.now()}`,
+      senderId: userId,
+      senderName: userName,
+      text: inputMessage.trim(),
+      timestamp: Date.now(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+
+    socket.emit("sendMessage", {
+      roomId: meetingId,
+      senderId: userId,
+      content: inputMessage.trim(),
     });
 
-    socketRef.current = socket;
-
-    socket.on("connect", () => console.log("🔌 Socket connected:", socket.id));
-    socket.on("disconnect", () => console.log("❌ Socket disconnected"));
-
-    return () => {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
-    };
-  }, [status, session?.user?.id, session?.user?.name]);
-
-  // Room management
-  useEffect(() => {
-    const socket = socketRef.current;
-    if (!socket || !session?.user?.id || !roomId) return;
-
-    if (currentRoomRef.current && currentRoomRef.current !== roomId) {
-      socket.emit("leaveRoom", {
-        roomId: currentRoomRef.current,
-        userId: session.user.id,
-      });
-      setMessages([]);
-      setOnlineUsers([]);
-    }
-
-    currentRoomRef.current = roomId;
-    socket.emit("joinRoom", {
-      roomId,
-      userId: session.user.id,
-      userName: session.user.name || "Anonymous",
-    });
-
-    const handleInitialMessages = (msgs: any) => {
-      if (!Array.isArray(msgs)) {
-        setMessages([]);
-        return;
-      }
-      setMessages(msgs);
-      setTimeout(
-        () => messagesEndRef.current?.scrollIntoView({ behavior: "auto" }),
-        50,
-      );
-    };
-
-    const handleNewMessage = (message: any) => {
-      const normalized = {
-        ...message,
-        _id: message._id?.toString?.() || String(message._id),
-      };
-      setMessages((prev) => {
-        const prevArray = Array.isArray(prev) ? prev : [];
-        if (prevArray.some((m) => m._id === normalized._id)) return prevArray;
-        return [...prevArray, normalized];
-      });
-    };
-
-    const handleOnlineUsers = (list: any) => {
-      if (!Array.isArray(list)) {
-        setOnlineUsers([]);
-        return;
-      }
-      setOnlineUsers(list);
-    };
-
-    const handleMessageEdited = (updated: any) => {
-      if (!updated || typeof updated !== "object") return;
-      setMessages((prev) =>
-        Array.isArray(prev)
-          ? prev.map((m) => (m._id === updated._id ? { ...m, ...updated } : m))
-          : [],
-      );
-    };
-
-    const handleMessageDeleted = (id: string) => {
-      setMessages((prev) =>
-        Array.isArray(prev)
-          ? prev.filter((m) => m._id !== id && m.id !== id)
-          : [],
-      );
-    };
-
-    const handleUserLeft = () => alert("The other user has left the chat");
-
-    const handleIncomingCall = (data: {
-      callerName: string;
-      callerId: string;
-      meetingId: string;
-    }) => {
-      if (data.callerId !== session.user.id) {
-        setIncomingCall({
-          callerName: data.callerName,
-          meetingId: data.meetingId,
-        });
-      }
-    };
-
-    const handleCallEnded = (data: {
-      callerName: string;
-      duration: number;
-    }) => {
-      console.log("📞 Call ended:", data);
-    };
-
-    socket.on("initialMessages", handleInitialMessages);
-    socket.on("newMessage", handleNewMessage);
-    socket.on("onlineUsersWithNames", handleOnlineUsers);
-    socket.on("messageEdited", handleMessageEdited);
-    socket.on("messageDeleted", handleMessageDeleted);
-    socket.on("user-left", handleUserLeft);
-    socket.on("incoming-call", handleIncomingCall);
-    socket.on("call-ended", handleCallEnded);
-
-    return () => {
-      socket.off("initialMessages", handleInitialMessages);
-      socket.off("newMessage", handleNewMessage);
-      socket.off("onlineUsersWithNames", handleOnlineUsers);
-      socket.off("messageEdited", handleMessageEdited);
-      socket.off("messageDeleted", handleMessageDeleted);
-      socket.off("user-left", handleUserLeft);
-      socket.off("incoming-call", handleIncomingCall);
-      socket.off("call-ended", handleCallEnded);
-
-      if (currentRoomRef.current === roomId) {
-        socket.emit("leaveRoom", { roomId, userId: session.user.id });
-        currentRoomRef.current = null;
-      }
-    };
-  }, [roomId, session?.user?.id, session?.user?.name]);
-
-  // Resizable panel logic
-  useEffect(() => {
-    if (!isSummaryPanelOpen) return;
-
-    const handleMouseMove = (e: MouseEvent) => {
-      const newWidth = window.innerWidth - e.clientX;
-      if (newWidth >= 280 && newWidth <= 600) setSummaryPanelWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "default";
-      document.body.style.userSelect = "auto";
-    };
-
-    const handleMouseDown = () => {
-      document.addEventListener("mousemove", handleMouseMove);
-      document.addEventListener("mouseup", handleMouseUp);
-      document.body.style.cursor = "ew-resize";
-      document.body.style.userSelect = "none";
-    };
-
-    const resizeHandle = resizeRef.current;
-    if (resizeHandle)
-      resizeHandle.addEventListener("mousedown", handleMouseDown);
-
-    return () => {
-      if (resizeHandle)
-        resizeHandle.removeEventListener("mousedown", handleMouseDown);
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isSummaryPanelOpen]);
-
-  const handleExit = () => {
-    if (socketRef.current && currentRoomRef.current) {
-      socketRef.current.emit("leaveRoom", {
-        roomId: currentRoomRef.current,
-        userId: session?.user?.id,
-      });
-      currentRoomRef.current = null;
-    }
-    router.push("/schedule");
+    setInputMessage("");
   };
-
-  const handleSend = () => {
-    if (!newMessage.trim() || !socketRef.current || !session?.user) return;
-    socketRef.current.emit("sendMessage", {
-      roomId,
-      senderId: session.user.id,
-      senderName: session.user.name || "Anonymous",
-      content: newMessage.trim(),
-      createdAt: new Date(),
-    });
-    setNewMessage("");
-  };
-
-  const handleSelectSuggestion = (suggestion: string) =>
-    setNewMessage(suggestion);
-
-  const handleUpdate = (id: string) => {
-    const newText = prompt("Enter updated message:");
-    if (!newText || !socketRef.current) return;
-    socketRef.current.emit("editMessage", {
-      roomId,
-      messageId: String(id),
-      senderId: session?.user.id,
-      newContent: newText,
-    });
-    setMessages((prev) =>
-      Array.isArray(prev)
-        ? prev.map((m) => (m._id === id ? { ...m, content: newText } : m))
-        : prev,
-    );
-  };
-
-  const handleDelete = (id: string) => {
-    if (!confirm("Delete this message?") || !socketRef.current) return;
-    socketRef.current.emit("deleteMessage", {
-      roomId,
-      messageId: id,
-      senderId: session?.user.id,
-    });
-  };
-
-  const handleCallStart = (callData: {
-    meetingId: string;
-    callerName: string;
-    timestamp: number;
-  }) => {
-    if (socketRef.current) {
-      socketRef.current.emit("call-started", {
-        roomId,
-        callerId: session?.user?.id,
-        callerName: callData.callerName,
-        meetingId: callData.meetingId,
-        timestamp: callData.timestamp,
-      });
-    }
-  };
-
-  const handleCallEnd = (callData: {
-    meetingId: string;
-    callerName: string;
-    duration: number;
-    timestamp: number;
-  }) => {
-    if (socketRef.current) {
-      socketRef.current.emit("call-ended", {
-        roomId,
-        callerId: session?.user?.id,
-        callerName: callData.callerName,
-        duration: callData.duration,
-        timestamp: callData.timestamp,
-      });
-    }
-  };
-
-  const handleSendCallMessage = (msg: string) => {
-    if (socketRef.current) {
-      socketRef.current.emit("sendMessage", {
-        roomId,
-        senderId: "system",
-        senderName: "System",
-        content: msg,
-        type: "system",
-        createdAt: new Date(),
-      });
-    }
-  };
-
- const handleAcceptCall = async () => {
-  if (!incomingCall) return;
-  const roomToJoin = roomId;
-  setIncomingCall(null);
-
-  try {
-    console.log("📞 Accepting call for room:", roomToJoin);
-
-    const res = await fetch("/api/videocall/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ roomName: roomToJoin }),
-    });
-
-    if (!res.ok) {
-      const errorData = await res.json();
-      throw new Error(`Failed to get token: ${errorData.error || "Server error"}`);
-    }
-
-    const data = await res.json();
-
-    if (!data.token || typeof data.token !== "string") {
-      throw new Error("Invalid token format received from server");
-    }
-
-    console.log("✅ Token received, length:", data.token.length);
-
-    // Set all state in one batch before any side effects
-    setCallToken(data.token);
-    setActiveCallRoomName(roomToJoin);
-    setCallStartTime(Date.now());
-    setShowEmbeddedCall(true);
-
-    // DELAY the message send so it doesn't cause a re-render mid-join
-    setTimeout(() => {
-      handleSendCallMessage(
-        locale === "ru"
-          ? `📞 ${session?.user?.name} присоединился к звонку`
-          : `📞 ${session?.user?.name} joined the video call`,
-      );
-    }, 2000);
-
-  } catch (error) {
-    console.error("❌ Failed to join call:", error);
-    alert(`Failed to join call: ${error instanceof Error ? error.message : "Unknown error"}\n\nPlease try again.`);
-    setShowEmbeddedCall(false);
-    setCallToken(null);
-    setActiveCallRoomName(null);
-  }
-};
-
-  const handleCloseEmbeddedCall = () => {
-    if (callStartTime) {
-      const duration = Math.floor((Date.now() - callStartTime) / 1000);
-      if (socketRef.current) {
-        socketRef.current.emit("call-ended", {
-          roomId,
-          callerId: session?.user?.id,
-          callerName: session?.user?.name || "Guest",
-          duration,
-          timestamp: Date.now(),
-        });
-      }
-      const minutes = Math.floor(duration / 60);
-      const seconds = duration % 60;
-      const durationText =
-        minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
-      handleSendCallMessage(
-        locale === "ru"
-          ? `📞 ${session?.user?.name} покинул звонок • Длительность: ${durationText}`
-          : `📞 ${session?.user?.name} left the call • Duration: ${durationText}`,
-      );
-      setCallStartTime(null);
-    }
-
-    setShowEmbeddedCall(false);
-    setCallToken(null);
-    setActiveCallRoomName(null);
-  };
-
-  const handleDeclineCall = () => setIncomingCall(null);
-
-  const handleSummarize = async () => {
-    if (messages.length === 0) {
-      alert(
-        locale === "ru"
-          ? "Нет сообщений для суммирования"
-          : "No messages to summarize",
-      );
-      return;
-    }
-
-    setLoadingSummary(true);
-    setIsSummaryPanelOpen(true);
-
-    try {
-      const res = await fetch("/api/summarize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId, userId: selectedUserId }),
-      });
-
-      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-
-      const data = await res.json();
-
-      if (data.error) {
-        setSummary(`Error: ${data.error}`);
-      } else if (selectedUserId && data.userSummary) {
-        setSummary(data.userSummary);
-      } else if (data.fullSummary) {
-        setSummary(data.fullSummary);
-      } else {
-        setSummary(JSON.stringify(data, null, 2) || "No summary available.");
-      }
-    } catch (error) {
-      setSummary(
-        `Failed to summarize: ${error instanceof Error ? error.message : "Unknown error"}`,
-      );
-    } finally {
-      setLoadingSummary(false);
-    }
-  };
-
-  // Render embedded video call if active
-  if (showEmbeddedCall && session?.user && activeCallRoomName && callToken) {
-    return (
-      <div className="fixed inset-0 z-50 bg-gray-900">
-        <VideoCallWithTranscription
-          roomName={activeCallRoomName}
-          displayName={session.user.name || "Guest"}
-          userId={session.user.id!}
-          onClose={handleCloseEmbeddedCall}
-          token={callToken}
-        />
-      </div>
-    );
-  }
-
-  if (status === "loading") {
-    return (
-      <div className="flex items-center justify-center h-screen bg-gradient-to-br from-slate-50 via-indigo-50 to-slate-100">
-        <div className="flex flex-col items-center gap-4">
-          <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin"></div>
-          <p className="text-xl text-slate-700 font-medium">Loading...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (status === "unauthenticated") {
-    router.push("/api/auth/signin");
-    return null;
-  }
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-slate-50 via-indigo-50 to-slate-100 flex flex-col font-sans text-gray-800 overflow-hidden">
-      {incomingCall && (
-        <CallNotification
-          callerName={incomingCall.callerName}
-          meetingId={incomingCall.meetingId}
-          onAccept={handleAcceptCall}
-          onDecline={handleDeclineCall}
-        />
-      )}
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
 
       {/* Header */}
-      <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b-2 border-indigo-200 shadow-lg">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                <h1 className="text-lg sm:text-xl font-bold text-slate-800">
-                  {locale === "ru" ? "Комната встречи" : "Meeting Room"}
-                </h1>
-              </div>
-              <span className="hidden sm:inline-block px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm font-medium">
-                {roomId}
+      <div className="flex items-center justify-between px-6 py-4 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white">
+            Meeting Chat
+          </h2>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Room: {meetingId}
+          </p>
+        </div>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {messages.length === 0 && (
+          <div className="text-center text-gray-400 py-16 text-sm">
+            No messages yet. Start the conversation.
+          </div>
+        )}
+        {messages.map((msg) => (
+          <div
+            key={msg.id}
+            className={`flex flex-col ${
+              msg.senderId === userId ? "items-end" : "items-start"
+            }`}
+          >
+            <div className="flex items-center gap-2 mb-1 text-xs text-gray-500 dark:text-gray-400">
+              <span className="font-semibold">{msg.senderName}</span>
+              <span>•</span>
+              <span>
+                {new Date(msg.timestamp!).toLocaleTimeString([], {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
               </span>
             </div>
-
-            <div className="flex items-center gap-3">
-              <div className="hidden sm:flex items-center gap-2 px-3 py-2 bg-green-50 rounded-lg border border-green-200">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                <span className="text-sm font-medium text-green-700">
-                  {onlineUsers.length} {locale === "ru" ? "онлайн" : "online"}
-                </span>
-              </div>
-
-              <button
-                onClick={() => setIsSummaryPanelOpen(!isSummaryPanelOpen)}
-                className="px-4 py-2 bg-indigo-500 text-white rounded-lg hover:bg-indigo-600 transition-all duration-200 font-medium text-sm shadow-md hover:shadow-lg flex items-center gap-2"
-              >
-                <svg
-                  className="w-4 h-4"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
-                </svg>
-                <span className="hidden sm:inline">
-                  {locale === "ru" ? "Суммаризация" : "Summary"}
-                </span>
-              </button>
-
-              <button
-                onClick={handleExit}
-                className="px-4 py-2 bg-white border-2 border-red-400 text-red-600 rounded-lg hover:bg-red-500 hover:text-white hover:border-red-500 transition-all duration-200 font-medium text-sm shadow-sm"
-              >
-                {locale === "ru" ? "Выйти" : "Exit"}
-              </button>
+            <div
+              className={`max-w-[70%] rounded-2xl px-4 py-2.5 text-sm shadow-sm ${
+                msg.senderId === userId
+                  ? "bg-blue-600 text-white rounded-tr-none"
+                  : "bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-tl-none border border-gray-200 dark:border-gray-700"
+              }`}
+            >
+              {msg.text}
             </div>
           </div>
-        </div>
-      </header>
+        ))}
+        <div ref={messagesEndRef} />
+      </div>
 
-      {/* Main Content */}
-      <main className="flex-1 flex overflow-hidden relative">
-        <div
-          className="flex-1 flex flex-col overflow-hidden"
-          style={{
-            width: isSummaryPanelOpen
-              ? `calc(100% - ${summaryPanelWidth}px)`
-              : "100%",
-            transition: "width 0.3s ease",
-          }}
+      {/* Input */}
+      <div className="p-4 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 flex gap-3">
+        <input
+          type="text"
+          value={inputMessage}
+          onChange={(e) => setInputMessage(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+          placeholder="Type a message..."
+          className="flex-1 px-4 py-2.5 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+        />
+        <button
+          onClick={handleSendMessage}
+          disabled={!inputMessage.trim()}
+          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-medium rounded-xl text-sm transition-colors flex items-center gap-2"
         >
-          <div className="flex-1 max-w-5xl mx-auto w-full px-4 py-6 flex flex-col gap-4 overflow-hidden">
-            {/* Online Users Bar */}
-            <div className="bg-white/90 backdrop-blur-sm rounded-2xl p-4 shadow-md border border-indigo-100">
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <svg
-                    className="w-5 h-5 text-indigo-500"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
-                    />
-                  </svg>
-                  <span className="text-sm font-medium text-slate-600">
-                    {locale === "ru" ? "В комнате:" : "In room:"}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {onlineUsers.length === 0 ? (
-                    <span className="text-sm text-slate-400 italic">
-                      {locale === "ru"
-                        ? "Нет пользователей"
-                        : "No users online"}
-                    </span>
-                  ) : (
-                    onlineUsers.map((u) => (
-                      <div
-                        key={u.id}
-                        className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 shadow-sm"
-                      >
-                        <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                        <span className="text-sm font-medium text-slate-700">
-                          {u.name ||
-                            (locale === "ru" ? "Анонимный" : "Anonymous")}
-                        </span>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Messages Container */}
-            <div className="flex-1 bg-white/90 backdrop-blur-sm rounded-2xl shadow-lg border-2 border-indigo-100 overflow-hidden flex flex-col">
-              <div
-                ref={containerRef}
-                className="flex-1 overflow-y-auto p-4 space-y-3 scroll-smooth"
-                style={{ minHeight: 0 }}
-              >
-                {Array.isArray(messages) && messages.length === 0 ? (
-                  <div className="flex items-center justify-center h-full">
-                    <div className="text-center text-slate-400">
-                      <svg
-                        className="w-16 h-16 mx-auto mb-4 opacity-50"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={1.5}
-                          d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
-                        />
-                      </svg>
-                      <p className="text-lg font-medium">
-                        {locale === "ru" ? "Нет сообщений" : "No messages yet"}
-                      </p>
-                      <p className="text-sm mt-2">
-                        {locale === "ru"
-                          ? "Начните разговор!"
-                          : "Start the conversation!"}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  Array.isArray(messages) &&
-                  messages.map((msg) => (
-                    <div key={msg._id}>
-                      {msg.senderId === "system" || msg.type === "system" ? (
-                        <div className="flex justify-center my-3">
-                          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 px-4 py-2 rounded-full border border-blue-200 shadow-sm">
-                            <p className="text-sm text-blue-700 font-medium">
-                              {msg.content}
-                            </p>
-                          </div>
-                        </div>
-                      ) : (
-                        <div
-                          className={`flex ${msg.senderId === session?.user?.id ? "justify-end" : "justify-start"}`}
-                        >
-                          <div
-                            className={`max-w-[75%] sm:max-w-[70%] rounded-2xl p-3 shadow-md transition-all duration-200 hover:shadow-lg ${msg.senderId === session?.user?.id ? "bg-gradient-to-br from-indigo-500 to-blue-500 text-white" : "bg-white border border-slate-200 text-slate-800"}`}
-                          >
-                            <div className="flex items-center justify-between gap-3 mb-1">
-                              <span
-                                className={`font-semibold text-xs ${msg.senderId === session?.user?.id ? "text-indigo-100" : "text-slate-600"}`}
-                              >
-                                {msg.sender?.name ||
-                                  (locale === "ru" ? "Гость" : "Guest")}
-                              </span>
-                              {msg.senderId === session?.user?.id && (
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    onClick={() =>
-                                      handleUpdate(String(msg._id))
-                                    }
-                                    className="p-1.5 rounded-lg bg-white/20 hover:bg-white/30 transition-all duration-200"
-                                  >
-                                    <svg
-                                      className="w-3.5 h-3.5"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      viewBox="0 0 24 24"
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
-                                      />
-                                    </svg>
-                                  </button>
-                                  <button
-                                    onClick={() =>
-                                      handleDelete(String(msg._id))
-                                    }
-                                    className="p-1.5 rounded-lg bg-white/20 hover:bg-red-400 transition-all duration-200"
-                                  >
-                                    <svg
-                                      className="w-3.5 h-3.5"
-                                      fill="none"
-                                      stroke="currentColor"
-                                      viewBox="0 0 24 24"
-                                    >
-                                      <path
-                                        strokeLinecap="round"
-                                        strokeLinejoin="round"
-                                        strokeWidth={2}
-                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                                      />
-                                    </svg>
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                            <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
-                              {msg.content}
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ))
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-
-              {/* Message Input */}
-              <div className="p-4 bg-gradient-to-r from-slate-50 to-indigo-50 border-t-2 border-indigo-100">
-                <div className="flex gap-2">
-                  <input
-                    value={newMessage}
-                    onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyDown={(e) =>
-                      e.key === "Enter" && !e.shiftKey && handleSend()
-                    }
-                    placeholder={
-                      locale === "ru"
-                        ? "Введите сообщение..."
-                        : "Type your message..."
-                    }
-                    className="flex-1 px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-indigo-400 focus:outline-none transition-all duration-200 bg-white shadow-sm"
-                  />
-                  <button
-                    onClick={handleSend}
-                    disabled={!newMessage.trim()}
-                    className="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-blue-500 text-white font-medium hover:from-indigo-600 hover:to-blue-600 transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                  >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                      />
-                    </svg>
-                    <span className="hidden sm:inline">
-                      {locale === "ru" ? "Отправить" : "Send"}
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom Action Bar */}
-            <div className="flex justify-center items-center gap-4 py-2">
-              {showAIHelper && session?.user && (
-                <AISuggestionsPanel
-                  roomId={roomId}
-                  userId={session.user.id!}
-                  userName={session.user.name || "User"}
-                  onSelectSuggestion={handleSelectSuggestion}
-                  locale={locale}
-                />
-              )}
-              <VideoChatButton
-                meetingId={roomId}
-                userId={session?.user?.id || ""}
-                userName={session?.user?.name || "Guest"}
-                variant="icon"
-                onCallStart={handleCallStart}
-                onCallEnd={handleCallEnd}
-                onSendMessage={handleSendCallMessage}
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Collapsible Summary Panel */}
-        <div
-          className={`fixed top-0 right-0 h-full bg-white border-l-2 border-indigo-200 shadow-2xl transform transition-transform duration-300 ease-in-out z-40 ${isSummaryPanelOpen ? "translate-x-0" : "translate-x-full"}`}
-          style={{ width: `${summaryPanelWidth}px` }}
-        >
-          <div
-            ref={resizeRef}
-            className="absolute left-0 top-0 w-1 h-full cursor-ew-resize hover:bg-indigo-400 bg-indigo-200 transition-colors duration-200"
-            style={{ marginLeft: "-4px", width: "8px" }}
-          />
-
-          <div className="h-full flex flex-col">
-            <div className="p-4 border-b-2 border-indigo-100 bg-gradient-to-r from-indigo-50 to-blue-50 flex items-center justify-between">
-              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                <svg
-                  className="w-5 h-5 text-indigo-500"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                  />
-                </svg>
-                {locale === "ru" ? "Суммаризация" : "Chat Summary"}
-              </h2>
-              <button
-                onClick={() => setIsSummaryPanelOpen(false)}
-                className="p-2 hover:bg-indigo-100 rounded-lg transition-colors duration-200"
-              >
-                <svg
-                  className="w-5 h-5 text-slate-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <div className="space-y-2">
-                <label className="block text-sm font-medium text-slate-700">
-                  {locale === "ru" ? "Суммировать для:" : "Summarize for:"}
-                </label>
-                <select
-                  value={selectedUserId || ""}
-                  onChange={(e) => setSelectedUserId(e.target.value || null)}
-                  className="w-full px-3 py-2 border-2 border-slate-200 rounded-lg focus:border-indigo-400 focus:outline-none transition-all duration-200 bg-white"
-                >
-                  <option value="">
-                    {locale === "ru" ? "Весь чат" : "Full Chat"}
-                  </option>
-                  {onlineUsers.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name || (locale === "ru" ? "Анонимный" : "Anonymous")}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <button
-                onClick={handleSummarize}
-                disabled={loadingSummary || messages.length === 0}
-                className="w-full px-4 py-3 bg-gradient-to-r from-indigo-500 to-blue-500 text-white rounded-lg font-medium hover:from-indigo-600 hover:to-blue-600 transition-all duration-200 shadow-md hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {loadingSummary ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    <span>
-                      {locale === "ru" ? "Суммируется..." : "Summarizing..."}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M13 10V3L4 14h7v7l9-11h-7z"
-                      />
-                    </svg>
-                    <span>
-                      {locale === "ru" ? "Суммировать" : "Summarize Chat"}
-                    </span>
-                  </>
-                )}
-              </button>
-
-              {summary && (
-                <div className="bg-gradient-to-br from-indigo-50 to-blue-50 rounded-xl p-4 border-2 border-indigo-200 shadow-sm">
-                  <div className="flex items-start gap-2 mb-3">
-                    <svg
-                      className="w-5 h-5 text-indigo-500 flex-shrink-0 mt-0.5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                      />
-                    </svg>
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-indigo-700 mb-2">
-                        {locale === "ru" ? "Резюме:" : "Summary:"}
-                      </h3>
-                      <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">
-                        {summary}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {!summary && !loadingSummary && (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <svg
-                    className="w-16 h-16 text-slate-300 mb-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={1.5}
-                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                    />
-                  </svg>
-                  <p className="text-slate-400 text-sm">
-                    {locale === "ru"
-                      ? "Нажмите кнопку выше, чтобы создать суммаризацию"
-                      : "Click the button above to generate a summary"}
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </main>
-
-      <footer className="bg-white/80 backdrop-blur-sm border-t border-slate-200 py-3 px-4 text-center">
-        <p className="text-sm text-slate-500">
-          {locale === "ru"
-            ? "© 2026 СумМит. Все права защищены."
-            : "© 2026 SumMeet. All rights reserved."}
-        </p>
-      </footer>
+          <Send size={16} />
+          Send
+        </button>
+      </div>
     </div>
   );
 }

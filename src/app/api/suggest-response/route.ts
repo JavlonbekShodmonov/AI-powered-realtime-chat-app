@@ -175,6 +175,7 @@ export async function POST(req: NextRequest) {
     const client = await clientPromise;
     const db = client.db();
     const messagesCollection = db.collection("messages");
+    const transcriptsCollection = db.collection("videocall_speech_transcripts");
     const usersCollection = db.collection("users");
 
     // ✅ Fetch recent messages with timeout
@@ -199,6 +200,35 @@ export async function POST(req: NextRequest) {
     }
 
     if (recentMessages.length === 0) {
+      // Fallback to video call transcripts when regular chat messages are not found.
+      const fetchTranscriptsPromise = transcriptsCollection
+        .find({ roomId })
+        .sort({ timestamp: -1 })
+        .limit(lastMessagesCount)
+        .toArray();
+
+      recentMessages = await Promise.race([fetchTranscriptsPromise, timeoutPromise]) as any[];
+
+      if (recentMessages.length === 0 && ObjectId.isValid(roomId)) {
+        recentMessages = await transcriptsCollection
+          .find({ roomId: new ObjectId(roomId) })
+          .sort({ timestamp: -1 })
+          .limit(lastMessagesCount)
+          .toArray();
+      }
+
+      if (recentMessages.length > 0) {
+        recentMessages = recentMessages.map((item: any) => ({
+          senderId: item.userId || item.user_id || "guest",
+          content: item.text || item.content || "",
+          createdAt: item.timestamp || item.createdAt || Date.now(),
+          userName: item.userName || item.user_name || "Guest",
+          type: item.type || "speech",
+        }));
+      }
+    }
+
+    if (recentMessages.length === 0) {
       const initialSuggestions = [
         "Hi! Nice to meet you.",
         "Hello, how can I help you today?",
@@ -218,7 +248,7 @@ export async function POST(req: NextRequest) {
     recentMessages = recentMessages.reverse();
 
     // ✅ FIX: Safe conversion of senderIds to ObjectId
-    const senderIds = [...new Set(recentMessages.map((m: any) => m.senderId))];
+    const senderIds = Array.from(new Set(recentMessages.map((m: any) => m.senderId)));
     
     // Convert to ObjectId only if valid, otherwise keep as string
     const validObjectIds: ObjectId[] = [];
@@ -261,7 +291,7 @@ export async function POST(req: NextRequest) {
     const conversation = recentMessages
       .map((m: any) => {
         const senderId = m.senderId instanceof ObjectId ? m.senderId.toString() : String(m.senderId);
-        const senderName = userMap.get(senderId) || "Guest";
+        const senderName = userMap.get(senderId) || m.userName || "Guest";
         const isCurrentUser = senderId === userId || m.senderId === userId;
         return `${isCurrentUser ? "You" : senderName}: ${m.content}`;
       })

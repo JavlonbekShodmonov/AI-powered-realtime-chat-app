@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
-import { Lightbulb, Sparkles, RefreshCw, X } from 'lucide-react';
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { Lightbulb, Sparkles, RefreshCw, X } from "lucide-react";
+import { socketManager } from "@/app/utils/socketClient"; // adjust path to your actual file
 
 interface AISuggestionsPanelProps {
   roomId: string;
@@ -14,25 +17,53 @@ export default function AISuggestionsPanel({
   userId,
   userName,
   onSelectSuggestion,
-  locale = 'en',
+  locale = "en",
 }: AISuggestionsPanelProps) {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [isOpen, setIsOpen] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    // Guests never had a NextAuth session, so /api/socket-token can't
+    // authenticate them — no point attempting a connection that the
+    // gateway will just reject.
+    if (!userId || userId === "guest") return;
+
+    const socket = socketManager.connect(userId, userName);
+
+    // Delivered directly to the `user:${userId}` room every authenticated
+    // socket auto-joins on connect (see RealtimeGateway.handleConnection) —
+    // no joinRoom call needed for this specific event.
+    function handleSuggestionsReady(data: any) {
+      if (!data?.success) return;
+      setSuggestions(data.suggestions || []);
+      setLoading(false);
+      if (data.note) {
+        // Non-fatal note (e.g. quota fallback) — suggestions still arrived,
+        // just via the fallback path. Not treated as an error.
+        console.log("Suggestions note:", data.note);
+      }
+    }
+
+    socket.on("suggestions-ready", handleSuggestionsReady);
+    return () => {
+      socket.off("suggestions-ready", handleSuggestionsReady);
+    };
+  }, [userId, userName]);
+
   const fetchSuggestions = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      const response = await fetch('/api/suggest-response', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+      const baseUrl =
+        process.env.NEXT_PUBLIC_AI_SERVICE_URL || "http://localhost:3003";
+      const response = await fetch(`${baseUrl}/api/ai/suggest-response`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          roomId,
+          roomId: String(roomId),
           userId,
           userName,
           lastMessagesCount: 10,
@@ -42,21 +73,30 @@ export default function AISuggestionsPanel({
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-
-      const data = await response.json();
-      setSuggestions(data.suggestions || []);
-    } catch (err) {
-      console.error('Failed to fetch suggestions:', err);
-      setError(locale === 'ru' ? 'Не удалось загрузить предложения' : 'Failed to load suggestions');
-    } finally {
+      // Deliberately not reading the response body for suggestions here —
+      // this call only queues the job (see ai.controller.ts's
+      // { message: 'Suggestion job queued', jobId }). The real suggestions
+      // arrive via the "suggestions-ready" socket listener above.
+      //one small change, the catch block in fetchSuggestions, to show the upgrade
+      // message instead of a generic error on a 402:
+    } catch (err: any) {
+      console.error("Failed to request suggestions:", err);
+      const is402 = err?.message?.includes("402");
+      setError(
+        is402
+          ? locale === "ru"
+            ? "Бесплатная попытка уже использована. Оформите платную подписку."
+            : "Free trial used. Upgrade for unlimited suggestions."
+          : locale === "ru"
+            ? "Не удалось запросить предложения"
+            : "Failed to request suggestions",
+      );
       setLoading(false);
     }
   };
 
   const handleSelectSuggestion = (suggestion: string) => {
     onSelectSuggestion(suggestion);
-    // Optionally close or refresh after selection
-    // setIsOpen(false);
   };
 
   if (!isOpen) {
@@ -64,7 +104,7 @@ export default function AISuggestionsPanel({
       <button
         onClick={() => setIsOpen(true)}
         className="fixed bottom-24 right-4 bg-gradient-to-r from-purple-500 to-indigo-600 text-white p-3 rounded-full shadow-lg hover:shadow-xl transition-all duration-300 z-50 group"
-        title={locale === 'ru' ? 'Показать AI помощника' : 'Show AI Helper'}
+        title={locale === "ru" ? "Показать AI помощника" : "Show AI Helper"}
       >
         <Sparkles className="w-6 h-6 group-hover:animate-pulse" />
       </button>
@@ -72,13 +112,13 @@ export default function AISuggestionsPanel({
   }
 
   return (
-    <div className="fixed bottom-4 right-4 w-80 bg-white border-2 border-indigo-300 rounded-2xl shadow-2xl z-50 overflow-hidden">
-      {/* Header */}
+    <div className="fixed bottom-4 right-4 left-4 sm:left-auto w-auto sm:w-80 bg-white border-2 border-indigo-300 rounded-2xl shadow-2xl z-50 overflow-hidden">
+      {" "}
       <div className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white p-4 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Sparkles className="w-5 h-5" />
           <h3 className="font-semibold">
-            {locale === 'ru' ? 'AI Помощник' : 'AI Helper'}
+            {locale === "ru" ? "AI Помощник" : "AI Helper"}
           </h3>
         </div>
         <button
@@ -88,22 +128,20 @@ export default function AISuggestionsPanel({
           <X className="w-5 h-5" />
         </button>
       </div>
-
-      {/* Content */}
       <div className="p-4 max-h-96 overflow-y-auto">
         {suggestions.length === 0 && !loading && !error && (
           <div className="text-center py-8">
             <Lightbulb className="w-12 h-12 text-gray-400 mx-auto mb-3" />
             <p className="text-gray-500 text-sm mb-4">
-              {locale === 'ru'
-                ? 'Получите умные предложения для ответа'
-                : 'Get smart suggestions for your response'}
+              {locale === "ru"
+                ? "Получите умные предложения для ответа"
+                : "Get smart suggestions for your response"}
             </p>
             <button
               onClick={fetchSuggestions}
               className="px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-600 text-white rounded-lg hover:opacity-90 transition-opacity text-sm font-medium"
             >
-              {locale === 'ru' ? 'Получить предложения' : 'Get Suggestions'}
+              {locale === "ru" ? "Получить предложения" : "Get Suggestions"}
             </button>
           </div>
         )}
@@ -112,7 +150,7 @@ export default function AISuggestionsPanel({
           <div className="flex items-center justify-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
             <span className="ml-3 text-gray-600">
-              {locale === 'ru' ? 'Генерация...' : 'Generating...'}
+              {locale === "ru" ? "Генерация..." : "Generating..."}
             </span>
           </div>
         )}
@@ -124,7 +162,7 @@ export default function AISuggestionsPanel({
               onClick={fetchSuggestions}
               className="text-indigo-600 text-sm hover:underline"
             >
-              {locale === 'ru' ? 'Попробовать снова' : 'Try Again'}
+              {locale === "ru" ? "Попробовать снова" : "Try Again"}
             </button>
           </div>
         )}
@@ -133,15 +171,19 @@ export default function AISuggestionsPanel({
           <>
             <div className="flex items-center justify-between mb-3">
               <p className="text-sm text-gray-600 font-medium">
-                {locale === 'ru' ? 'Предлагаемые ответы:' : 'Suggested responses:'}
+                {locale === "ru"
+                  ? "Предлагаемые ответы:"
+                  : "Suggested responses:"}
               </p>
               <button
                 onClick={fetchSuggestions}
                 disabled={loading}
                 className="text-indigo-600 hover:text-indigo-800 disabled:opacity-50"
-                title={locale === 'ru' ? 'Обновить' : 'Refresh'}
+                title={locale === "ru" ? "Обновить" : "Refresh"}
               >
-                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                <RefreshCw
+                  className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+                />
               </button>
             </div>
 
@@ -170,18 +212,19 @@ export default function AISuggestionsPanel({
                 disabled={loading}
                 className="w-full py-2 text-sm text-indigo-600 hover:text-indigo-800 font-medium disabled:opacity-50"
               >
-                {locale === 'ru' ? '🔄 Новые предложения' : '🔄 New Suggestions'}
+                {locale === "ru"
+                  ? "🔄 Новые предложения"
+                  : "🔄 New Suggestions"}
               </button>
             </div>
           </>
         )}
       </div>
-
-      {/* Footer tip */}
       <div className="bg-gray-50 px-4 py-2 text-xs text-gray-500 border-t border-gray-200">
-        💡 {locale === 'ru' 
-          ? 'Нажмите на предложение, чтобы использовать его'
-          : 'Click a suggestion to use it'}
+        💡{" "}
+        {locale === "ru"
+          ? "Нажмите на предложение, чтобы использовать его"
+          : "Click a suggestion to use it"}
       </div>
     </div>
   );

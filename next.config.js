@@ -3,6 +3,14 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["@xenova/transformers"],
   },
+  async rewrites() {
+    return [
+      {
+        source: "/api/history/:path*",
+        destination: `${"http://localhost:3001"}/api/history/:path*`,
+      },
+    ];
+  },
   webpack: (config, { isServer }) => {
     if (!isServer) {
       config.resolve.alias = {
@@ -31,7 +39,7 @@ const nextConfig = {
           {
             key: "Content-Security-Policy",
             value:
-              "frame-src 'self' https://*.daily.co; script-src 'self' 'unsafe-inline' https://*.daily.co;",
+              "frame-src 'self' script-src 'self' 'unsafe-inline' 'unsafe-eval' ",
           },
         ],
       },

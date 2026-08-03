@@ -7,6 +7,13 @@ import GitHubProvider from "next-auth/providers/github";
 import { MongoDBAdapter } from "@auth/mongodb-adapter";
 import clientPromise from "@/lib/mongodb";
 
+type SessionUserWithId = {
+  id?: string;
+  name?: string | null;
+  email?: string | null;
+  image?: string | null;
+};
+
 export const authOptions: NextAuthOptions = {
   adapter: MongoDBAdapter(clientPromise),
 
@@ -39,10 +46,11 @@ export const authOptions: NextAuthOptions = {
       return token;
     },
     async session({ session, token }) {
-      if (token) {
-        session.user.id = token.id as string;
-        session.user.name = token.name as string; // ← add this
-        session.user.email = token.email as string; // ← add this too
+      if (token && session.user) {
+        const user = session.user as SessionUserWithId;
+        user.id = token.id as string;
+        user.name = token.name as string; // ← add this
+        user.email = token.email as string; // ← add this too
       }
       return session;
     },
@@ -50,9 +58,9 @@ export const authOptions: NextAuthOptions = {
 
     // ✅ Add this callback to redirect after sign-in
     async redirect({ url, baseUrl }) {
-      // If signing in, redirect to schedule
+      // If signing in, redirect to the plugin dashboard
       if (url === baseUrl || url === `${baseUrl}/`) {
-        return `${baseUrl}/schedule`;
+        return `${baseUrl}/meeting`;
       }
       // Allow relative callback URLs
       if (url.startsWith("/")) return `${baseUrl}${url}`;
@@ -96,8 +104,8 @@ export async function auth(req?: Request) {
     }
 
     const session = await getServerSession(authOptions);
-    if (session?.user?.id) {
-      return { userId: session.user.id, user: session.user };
+    if (session?.user && (session.user as SessionUserWithId).id) {
+      return { userId: (session.user as SessionUserWithId).id, user: session.user };
     }
 
     return { userId: null, user: null };

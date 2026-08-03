@@ -344,7 +344,7 @@ export default function FirstPage() {
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center justify-between gap-3">
           <h1 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
             {locale === "ru" ? "Планировщик встреч" : "Meeting Scheduler"}
           </h1>
@@ -386,7 +386,7 @@ export default function FirstPage() {
               </button>
 
               {showCalendar && (
-                <div className="border-2 border-indigo-100 rounded-xl p-4 bg-gray-50">
+                <div className="border-2 border-indigo-100 rounded-xl p-4 bg-gray-50 overflow-x-auto">
                   <DatePicker
                     selected={startDate}
                     onChange={handleDateChange}

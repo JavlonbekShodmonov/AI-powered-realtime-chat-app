@@ -2,19 +2,22 @@ version: '3.8'
 
 services:
   mongodb:
-    image: mongo:7.0
+    image: mongo:latest
+    container_name: summeet-mongo
     ports:
       - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: password123
+    volumes:
+      - mongo-data:/data/db
 
-  app:
-    build: .
+  redis:
+    image: redis:7-alpine
+    container_name: summeet-redis
     ports:
-      - "3000:3000"
-    environment:
-      MONGODB_URI: mongodb://admin:password123@mongodb:27017/yourdbname?authSource=admin
-      PORT: 3000
-    depends_on:
-      - mongodb
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+
+volumes:
+  mongo-data:
+  redis-data:

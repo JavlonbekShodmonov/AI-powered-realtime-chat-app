@@ -1,13 +1,13 @@
 import { MongoClient } from "mongodb";
 
-const uri = process.env.MONGODB_URI!;
+const uri = process.env.MONGODB_URI || process.env.MONGO_URL;
 const options = {};
 
 let client;
 let clientPromise: Promise<MongoClient>;
 
-if (!process.env.MONGODB_URI) {
-  throw new Error("Please add your MongoDB URI to .env.local");
+if (!uri) {
+  throw new Error("Please add your MongoDB URI to .env.local or set MONGO_URL");
 }
 
 if (process.env.NODE_ENV === "development") {

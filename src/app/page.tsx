@@ -92,10 +92,12 @@ export default function Home() {
                 {locale === "ru" ? "Встречи." : "Meetings."}
               </span>
               <span className="block bg-gradient-to-r from-cyan-400 via-blue-400 to-purple-400 bg-clip-text text-transparent">
-                {locale === "ru" ? "Умнее." : "Smarter."}
+                {locale === "ru"
+                  ? "Плагин для видеовстреч." 
+                  : "A plugin for video calls."}
               </span>
             </h1>
-
+ 
             <p
               className="text-xl md:text-2xl text-slate-300 max-w-3xl mx-auto leading-relaxed animate-[fadeInUp_1s_ease-out]"
               style={{
@@ -105,10 +107,9 @@ export default function Home() {
               }}
             >
               {locale === "ru"
-                ? "Автоматическая транскрипция, AI-резюме и видеозвонки в одном месте. Превратите каждую встречу в действенные инсайты."
-                : "Automatic transcription, AI summaries, and video calls in one place. Transform every meeting into actionable insights."}
+                ? "SumMeet подключается к существующим видеозвонкам, слушает разговор и создает мгновенные резюме, подсказки для ответа и историю встреч."
+                : "SumMeet plugs into your existing video calls, listens to the conversation, and delivers instant summaries, live response suggestions, and searchable meeting history."}
             </p>
-
             {/* Feature highlights */}
             <div
               className="flex flex-wrap justify-center gap-4 pt-4 animate-[fadeInUp_1.2s_ease-out]"
@@ -147,18 +148,11 @@ export default function Home() {
           </div>
 
           {/* CTA Buttons */}
-          <div
-            className="flex flex-col sm:flex-row gap-4 justify-center items-center animate-[fadeInUp_1.4s_ease-out]"
-            style={{
-              animationDelay: "0.6s",
-              opacity: 0,
-              animationFillMode: "forwards",
-            }}
-          >
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             {!session ? (
               <>
                 <button
-                  onClick={() => signIn("google", { callbackUrl: "/schedule" })}
+                  onClick={() => signIn("google", { callbackUrl: "/meeting" })}
                   className="group relative px-10 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold rounded-xl shadow-2xl shadow-blue-500/50 transition-all duration-300 transform hover:scale-105 hover:shadow-blue-500/70 w-full sm:w-auto overflow-hidden"
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-cyan-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
@@ -182,7 +176,7 @@ export default function Home() {
                 </button>
 
                 <button
-                  onClick={() => signIn("github", { callbackUrl: "/schedule" })}
+                  onClick={() => signIn("github", { callbackUrl: "/meeting" })}
                   className="group relative px-10 py-4 bg-white/10 backdrop-blur-sm border-2 border-white/20 text-white font-bold rounded-xl transition-all duration-300 transform hover:scale-105 hover:bg-white/20 hover:border-white/30 w-full sm:w-auto overflow-hidden"
                 >
                   <div className="relative flex items-center justify-center gap-3">
@@ -204,13 +198,13 @@ export default function Home() {
             ) : (
               <>
                 <a
-                  href="/schedule"
+                  href="/meeting"
                   className="group relative px-10 py-4 bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold rounded-xl shadow-2xl shadow-blue-500/50 transition-all duration-300 transform hover:scale-105 hover:shadow-blue-500/70 w-full sm:w-auto text-center overflow-hidden"
                 >
                   <div className="absolute inset-0 bg-gradient-to-r from-blue-600 to-cyan-500 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                   <div className="relative flex items-center justify-center gap-2">
                     <span>
-                      {locale === "ru" ? "Открыть расписание" : "Open Schedule"}
+                      {locale === "ru" ? "Открыть панель" : "Open Dashboard"}
                     </span>
                     <svg
                       className="w-5 h-5 group-hover:translate-x-1 transition-transform"
@@ -391,43 +385,7 @@ export default function Home() {
           </div>
         </div>
       </div>
-      {/* Animation Styles */}
-      {/* Custom animations */}
-      <style jsx>{`
-        @import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;700;900&display=swap");
-
-        @keyframes fadeInDown {
-          from {
-            opacity: 0;
-            transform: translateY(-20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @keyframes fadeInUp {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-      `}</style>
-      -{" "}
+      
       <div
         style={{
           padding: "40px",

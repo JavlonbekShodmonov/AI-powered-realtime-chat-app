@@ -1,54 +1,68 @@
 "use client";
 
-import { io } from "socket.io-client";
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
+import { io, Socket } from "socket.io-client";
 
-const SocketContext = createContext<any>(null);
+const SocketContext = createContext<Socket | null>(null);
 
-export function SocketProvider({ children }: { children: React.ReactNode }) {
-  const [socket, setSocket] = useState<any>(null);
-  interface ExtendedUser {
-    id: string;
-    name?: string | null;
-    email?: string | null;
-    image?: string | null;
-  }
+export const useSocket = () => useContext(SocketContext);
 
-  interface ExtendedSession {
-    user?: ExtendedUser;
-  }
-
-  const { data: session } = useSession() as { data: ExtendedSession | null };
+export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
+  const { status } = useSession();
+  const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
-    if (!session?.user?.id) return;
+    if (status !== "authenticated") return;
 
-    const base =
-      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3001";
+    let socketInstance: Socket | null = null;
 
-    console.log("SocketProvider - NextAuth userId:", session.user.id);
+    async function initSocket() {
+      try {
+        console.log("⏳ Fetching socket token...");
+        const res = await fetch("/api/socket-token");
+        if (!res.ok) throw new Error("Failed to fetch socket auth token");
+        
+        const { token } = await res.json();
+        const socketUrl = process.env.NEXT_PUBLIC_REALTIME_SERVICE_URL || "http://localhost:3002";
+        
+        console.log("🔌 Connecting to socket server at:", socketUrl);
 
-    const s = io(base, {
-      auth: {
-        userId: session.user.id,
-        userName: session.user.name || "Anonymous",
-      },
-      transports: ["websocket", "polling"],
-    });
+        socketInstance = io(socketUrl, {
+          auth: { token },
+          transports: ["websocket"],
+        });
 
-    setSocket(s);
+        socketInstance.on("connect", () => {
+          console.log("✅ Socket connected successfully! ID:", socketInstance?.id);
+        });
+
+        socketInstance.on("connect_error", (err) => {
+          console.error("❌ Socket connection error:", err.message);
+        });
+
+        socketInstance.on("disconnect", (reason) => {
+          console.warn("⚠️ Socket disconnected:", reason);
+        });
+
+        setSocket(socketInstance);
+      } catch (err) {
+        console.error("Socket authentication error:", err);
+      }
+    }
+
+    initSocket();
 
     return () => {
-      s.disconnect();
+      if (socketInstance) {
+        socketInstance.disconnect();
+      }
     };
-  }, [session?.user?.id]);
+  }, [status]);
 
   return (
-    <SocketContext.Provider value={socket}>{children}</SocketContext.Provider>
+    <SocketContext.Provider value={socket}>
+      {children}
+    </SocketContext.Provider>
   );
-}
-
-export function useSocket() {
-  return useContext(SocketContext);
-}
+};

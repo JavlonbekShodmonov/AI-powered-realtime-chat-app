@@ -37,7 +37,7 @@
     "global.d.ts",
     "src",
     "server/socket.ts"
-  ],
+, "../summeet-backend/apps/realtime-service/src/appointments/appointments.schema.ts"  ],
   "exclude": [
     "node_modules"
   ]

@@ -19,7 +19,12 @@ const app = express();
 
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://shadmanov.onrender.com"],
+    origin: [
+      "http://localhost:3000",
+      "https://shadmanov.onrender.com",
+      "https://summeet.live",
+      "https://summeet.vercel.app",
+    ],
     credentials: true,
   })
 );
@@ -62,6 +67,7 @@ const userSubscriptions = new Map<string, any>(); // userId -> push subscription
 
 const allowedOrigins = [
   "http://localhost:3000",
+  "https://summeet.live",
   "https://summeet.vercel.app",
 ];
 
@@ -546,7 +552,7 @@ io.on("connection", (socket: Socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 
 server.listen(PORT, () => {
   console.log(`✅ Socket.IO server running at http://localhost:${PORT}`);

@@ -1,14 +1,15 @@
 import { ObjectId } from "mongodb";
 import { NextRequest, NextResponse } from "next/server";
-import  { auth }  from "../../../../lib/auth";
-import {fetchMessage} from "../../../../lib/fetchMessage";
-
+import { auth } from "../../../../lib/auth";
+import { fetchMessage } from "../../../../lib/fetchMessage";
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const { userId } = await auth();
+  // Was calling Clerk's no-argument auth() — dead code now that Clerk is
+  // gone. Switched to the same auth(req) wrapper the rest of the app uses.
+  const { userId } = await auth(req);
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
@@ -45,29 +46,25 @@ export async function DELETE(
   { params }: { params: { id: string } }
 ) {
   try {
-    
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  }
+    const { userId } = await auth(req);
+    if (!userId) {
+      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    }
 
-  const { messagesCollection, error} = await fetchMessage(
-    params.id,
-    userId
-  );
+    if (!ObjectId.isValid(params.id)) {
+      return NextResponse.json({ error: "Invalid message ID" }, { status: 400 });
+    }
 
-  if(error){
-    return NextResponse.json({error:`${error}`});
-  }
+    const { messagesCollection, error } = await fetchMessage(params.id, userId);
 
-if (!ObjectId.isValid(params.id)) {
-  return NextResponse.json({ error: "Invalid message ID" }, { status: 400 });
-}
+    if (error) {
+      return NextResponse.json({ error: `${error}` });
+    }
 
-  await messagesCollection.deleteOne({_id:new ObjectId(params.id)});
+    await messagesCollection.deleteOne({ _id: new ObjectId(params.id) });
 
-  return NextResponse.json({message:"message deleted"});
-    } catch (error) {
+    return NextResponse.json({ message: "message deleted" });
+  } catch (error) {
     console.error("DELETE /api/messages/[id] error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }

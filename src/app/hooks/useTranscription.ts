@@ -1,252 +1,331 @@
-// hooks/useTranscription.ts
-// Desktop → Web Speech API (unchanged, real-time)
-// Mobile  → MediaRecorder + browser-whisper WASM (free, on-device, no API key)
-// Force client-side only
 "use client";
 
-if (typeof window === "undefined") {
-  throw new Error("useTranscription must be used client-side only");
-}
-import { useRef, useState, useCallback, useEffect } from "react";
-interface WhisperModule {
-  transcribe: (
-    audio: Blob | Float32Array,
-    options?: {
-      language?: string;
-      onProgress?: (p: any) => void;
-    },
-  ) => Promise<{ text: string }>;
+import { useState, useRef, useCallback } from "react";
+
+// ─── Types ─────────────────────────────────────────────────────────────────
+
+export type TranscriptionEngine = "webspeech" | "groq";
+export type TranscriptionStatus =
+  | "idle"
+  | "recording"
+  | "transcribing" // mobile only: uploading to Groq
+  | "done"
+  | "error";
+
+export interface SpeechLanguageOption {
+  code: string; // BCP-47 tag passed to recognition.lang
+  label: string; // shown in the UI
 }
 
-const isMobile = () =>
-  /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(
-    navigator.userAgent,
+export const SPEECH_LANGUAGE_OPTIONS: SpeechLanguageOption[] = [
+  { code: "en-US", label: "English" },
+  { code: "ru-RU", label: "Русский" },
+  { code: "uz-UZ", label: "O'zbekcha" },
+  { code: "kk-KZ", label: "Қазақша" },
+  { code: "tr-TR", label: "Türkçe" },
+  { code: "es-ES", label: "Español" },
+  { code: "fr-FR", label: "Français" },
+  { code: "de-DE", label: "Deutsch" },
+  { code: "ar-SA", label: "العربية" },
+  { code: "zh-CN", label: "中文" },
+];
+
+const DEFAULT_SPEECH_LANG = "en-US";
+
+interface TranscriptionOptions {
+  roomId: string;
+  userId: string;
+  userName: string;
+  onChunk?: (text: string) => void;
+  onError?: (message: string) => void;
+  onStatusChange?: (status: TranscriptionStatus) => void;
+}
+
+interface TranscriptionState {
+  transcript: string;
+  interimTranscript: string;
+  status: TranscriptionStatus;
+  engine: TranscriptionEngine;
+  isRecording: boolean;
+  isTranscribing: boolean;
+  speechLang: string;
+}
+
+function detectEngine(): TranscriptionEngine {
+  if (typeof window === "undefined") return "groq";
+  const mobile = /Android|iPhone|iPad|iPod|Opera Mini|IEMobile|WPDesktop/i.test(
+    navigator.userAgent
   );
+  if (mobile) return "groq";
+  const hasWebSpeech =
+    "webkitSpeechRecognition" in window || "SpeechRecognition" in window;
+  return hasWebSpeech ? "webspeech" : "groq";
+}
 
-const webSpeechSupported = () =>
-  !isMobile() &&
-  ("SpeechRecognition" in window || "webkitSpeechRecognition" in window);
+// ─── Save transcript chunk to NestJS microservice ──────────────────────────
 
-const getSupportedMimeType = () => {
-  const types = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg",
-  ];
-  return types.find((t) => MediaRecorder.isTypeSupported(t)) ?? "";
-};
+async function saveChunk(
+  roomId: string,
+  userId: string,
+  userName: string,
+  text: string
+): Promise<void> {
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_AI_SERVICE_URL || "http://localhost:3003";
+    await fetch(`${baseUrl}/api/ai/speech-transcripts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        roomId,
+        userId,
+        userName,
+        text: text.trim(),
+        timestamp: Date.now(),
+      }),
+    });
+  } catch (err) {
+    console.warn("Failed to save transcript chunk:", err);
+  }
+}
 
-// ─── hook ──────────────────────────────────────────────────────────────────
+// ─── Send audio blob to NestJS Groq transcription endpoint ─────────────────
 
-/**
- * useTranscription()
- *
- * Returns:
- *   start()            – begin recording / listening
- *   stop()             – stop; on mobile triggers Whisper transcription
- *   transcript         – final text (available after stop() resolves)
- *   interimTranscript  – live partial text (desktop only, "" on mobile)
- *   isListening        – true while mic is active
- *   isTranscribing     – true while Whisper WASM is running (mobile only)
- *   transcribeProgress – 0–1 progress value during transcription (mobile only)
- *   error              – string | null
- *   isMobileMode       – true when using the WASM path
- */
-export function useTranscription({ language = "en-US" } = {}) {
-  const [transcript, setTranscript] = useState("");
-  const [interimTranscript, setInterimTranscript] = useState("");
-  const [isListening, setIsListening] = useState(false);
-  const [isTranscribing, setIsTranscribing] = useState(false);
-  const [transcribeProgress, setTranscribeProgress] = useState(0);
-  const [error, setError] = useState<null | string>(null);
+async function sendToGroq(audioBlob: Blob): Promise<string> {
+  const formData = new FormData();
+  formData.append("audio", audioBlob, "recording.webm");
+
+  const res = await fetch(`${process.env.NEXT_PUBLIC_AI_SERVICE_URL}/api/ai/transcribe`, {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.message || `Transcription failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  return data.transcript as string;
+}
+
+// ─── Hook ──────────────────────────────────────────────────────────────────
+
+export function useTranscription(options: TranscriptionOptions) {
+  const { roomId, userId, userName, onChunk, onError, onStatusChange } = options;
+
+  const engine = detectEngine();
+
+  const [state, setState] = useState<TranscriptionState>({
+    transcript: "",
+    interimTranscript: "",
+    status: "idle",
+    engine,
+    isRecording: false,
+    isTranscribing: false,
+    speechLang: DEFAULT_SPEECH_LANG,
+  });
 
   const recognitionRef = useRef<any>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const streamRef = useRef<MediaStream | null>(null);
-  const isRecordingRef = useRef(false); // To track if we should be listening (handles auto-restarts)
-  // ── Desktop: Web Speech API ──────────────────────────────────────────────
+  const audioChunksRef = useRef<Blob[]>([]);
+  const finalTranscriptRef = useRef<string>("");
+  const lastSavedLengthRef = useRef<number>(0);
+  const speechLangRef = useRef<string>(DEFAULT_SPEECH_LANG);
 
-  const startDesktop = useCallback(() => {
+  function setStatus(status: TranscriptionStatus) {
+    setState((s) => ({
+      ...s,
+      status,
+      isRecording: status === "recording",
+      isTranscribing: status === "transcribing",
+    }));
+    onStatusChange?.(status);
+  }
+
+  function handleError(message: string) {
+    setStatus("error");
+    onError?.(message);
+    console.error("[useTranscription]", message);
+  }
+
+  async function saveNewChunk(fullText: string) {
+    const newPart = fullText.slice(lastSavedLengthRef.current).trim();
+    if (!newPart) return;
+    lastSavedLengthRef.current = fullText.length;
+    await saveChunk(roomId, userId, userName, newPart);
+    onChunk?.(newPart);
+  }
+
+  // ── WebSpeech (desktop Chrome / Edge) ────────────────────────────────────
+
+  const startWebSpeech = useCallback(() => {
     const SpeechRecognition =
       (window as any).SpeechRecognition ||
       (window as any).webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+      handleError("SpeechRecognition not supported in this browser.");
+      return;
+    }
+
     const recognition = new SpeechRecognition();
-    recognition.lang = language;
     recognition.continuous = true;
     recognition.interimResults = true;
+    recognition.lang = speechLangRef.current;
 
-    recognition.onresult = (e: any) => {
-      let final = "";
-      let interim = "";
-      for (const result of e.results) {
-        if (result.isFinal) final += result[0].transcript + " ";
-        else interim += result[0].transcript;
-      }
-      if (final) setTranscript((prev) => prev + final);
-      setInterimTranscript(interim);
-    };
-
-    recognition.onerror = (e: any) => {
-      // 'aborted' is non-fatal — just restart if we're still supposed to be listening
-      if (e.error === "aborted" && isRecordingRef.current) {
-        recognition.start();
-        return;
-      }
-      setError(`Speech recognition error: ${e.error}`);
-      setIsListening(false);
-    };
-    recognition.onend = () => {
-      // If we're still supposed to be listening, restart (handles aborts)
-      if (isRecordingRef.current) {
-        recognition.start();
-      } else {
-        setIsListening(false);
-      }
-    };
     recognitionRef.current = recognition;
-    recognition.start();
-    setIsListening(true);
-    setError(null);
-  }, [language]);
+    finalTranscriptRef.current = "";
+    lastSavedLengthRef.current = 0;
 
-  const stopDesktop = useCallback(() => {
-    recognitionRef.current?.stop();
-    setIsListening(false);
-    setInterimTranscript("");
+    recognition.onresult = async (event: any) => {
+      let interim = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const chunk = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscriptRef.current += chunk + " ";
+          await saveNewChunk(finalTranscriptRef.current);
+        } else {
+          interim += chunk;
+        }
+      }
+
+      setState((s) => ({
+        ...s,
+        transcript: finalTranscriptRef.current,
+        interimTranscript: interim,
+      }));
+    };
+
+    recognition.onerror = (event: any) => {
+      if (event.error === "no-speech") return;
+      handleError(`Speech recognition error: ${event.error}`);
+    };
+
+    recognition.onend = () => {
+      if (recognitionRef.current) {
+        try {
+          recognition.start();
+        } catch {
+          // Already started
+        }
+      }
+    };
+
+    recognition.start();
+    setStatus("recording");
+  }, [roomId, userId, userName]);
+
+  const stopWebSpeech = useCallback((): string => {
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+    setState((s) => ({ ...s, interimTranscript: "" }));
+    setStatus("done");
+    return finalTranscriptRef.current.trim();
   }, []);
 
-  // ── Mobile: MediaRecorder → browser-whisper WASM ─────────────────────────
+  const setSpeechLang = useCallback(
+    (langCode: string) => {
+      speechLangRef.current = langCode;
+      setState((s) => ({ ...s, speechLang: langCode }));
 
-  const startMobile = useCallback(async () => {
+      if (engine === "webspeech" && recognitionRef.current) {
+        recognitionRef.current.onend = null;
+        recognitionRef.current.stop();
+        recognitionRef.current = null;
+        startWebSpeech();
+      }
+    },
+    [engine, startWebSpeech]
+  );
+
+  // ── Groq Whisper (mobile) ─────────────────────────────────────────────────
+
+  const startMobileRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      chunksRef.current = [];
 
-      const mimeType = getSupportedMimeType();
-      const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "audio/mp4";
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      finalTranscriptRef.current = "";
+      lastSavedLengthRef.current = 0;
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
-      mediaRecorderRef.current = recorder;
-      recorder.start(1000);
-      setIsListening(true);
-      setError(null);
-    } catch (err: any) {
-      setError(`Microphone error: ${err.message}`);
-    }
-  }, []);
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        setStatus("transcribing");
 
-  const stopMobile = useCallback(async () => {
-    setIsListening(false);
+        try {
+          const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+          const text = await sendToGroq(audioBlob);
+
+          finalTranscriptRef.current = text;
+          await saveChunk(roomId, userId, userName, text);
+          onChunk?.(text);
+
+          setState((s) => ({ ...s, transcript: text }));
+          setStatus("done");
+        } catch (err: any) {
+          handleError(err.message || "Groq transcription failed");
+        }
+      };
+
+      mediaRecorder.start(1000);
+      setStatus("recording");
+    } catch (err: any) {
+      handleError(`Microphone access error: ${err.message}`);
+    }
+  }, [roomId, userId, userName]);
+
+  const stopMobileRecording = useCallback(() => {
     if (
-      !mediaRecorderRef.current ||
-      mediaRecorderRef.current.state === "inactive"
-    )
-      return;
-
-    // Create the promise before calling .stop() to ensure we catch the event
-    const blobPromise = new Promise<Blob>((resolve) => {
-      mediaRecorderRef.current!.onstop = () => {
-        const blob = new Blob(chunksRef.current, {
-          type: getSupportedMimeType(),
-        });
-        resolve(blob);
-      };
-    });
-
-    mediaRecorderRef.current.stop();
-    const audioBlob = await blobPromise;
-
-    // Stop the actual mic hardware to turn off the "green light" on the phone
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-
-    try {
-      setIsTranscribing(true);
-      setTranscribeProgress(0.2);
-
-      const groqApiKey = process.env.NEXT_PUBLIC_GROQ_API_KEY;
-      if (!groqApiKey) throw new Error("GROQ_API_KEY not set");
-
-      const ext = audioBlob.type.includes("mp4") ? "mp4" : "webm";
-      const file = new File([audioBlob], `recording.${ext}`, {
-        type: audioBlob.type,
-      });
-
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("model", "whisper-large-v3-turbo");
-      formData.append("language", language.split("-")[0]);
-      formData.append("response_format", "json");
-
-      setTranscribeProgress(0.5);
-
-      const res = await fetch(
-        "https://api.groq.com/openai/v1/audio/transcriptions",
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${groqApiKey}`,
-          },
-          body: formData,
-        },
-      );
-
-      if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Groq error: ${err}`);
-      }
-
-      const data = await res.json();
-      setTranscribeProgress(1);
-      setTranscript(data.text ?? "");
-    } catch (err: any) {
-      setError(err.message || "Transcription failed");
-    } finally {
-      setIsTranscribing(false);
-      setTranscribeProgress(0);
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
+      mediaRecorderRef.current.stop();
     }
-  }, [language]); // ← this closes stopMobile
-
-  // ── Public API ───────────────────────────────────────────────────────────
-
-  const start = useCallback(() => {
-    setTranscript("");
-    setInterimTranscript("");
-    setError(null);
-    if (webSpeechSupported()) startDesktop();
-    else startMobile();
-  }, [startDesktop, startMobile]);
-
-  const stop = useCallback(() => {
-    if (webSpeechSupported()) {
-      stopDesktop();
-      return Promise.resolve();
-    }
-    return stopMobile();
-  }, [stopDesktop, stopMobile]);
-
-  useEffect(() => {
-    return () => {
-      recognitionRef.current?.stop();
-      mediaRecorderRef.current?.stop();
-      streamRef.current?.getTracks().forEach((t) => t.stop());
-    };
   }, []);
+
+  // ── Public API ────────────────────────────────────────────────────────────
+
+  const start = useCallback(async () => {
+    finalTranscriptRef.current = "";
+    lastSavedLengthRef.current = 0;
+    setState((s) => ({ ...s, transcript: "", interimTranscript: "" }));
+
+    if (engine === "webspeech") {
+      startWebSpeech();
+    } else {
+      await startMobileRecording();
+    }
+  }, [engine, startWebSpeech, startMobileRecording]);
+
+  const stop = useCallback((): string => {
+    if (engine === "webspeech") {
+      return stopWebSpeech();
+    } else {
+      stopMobileRecording();
+      return "";
+    }
+  }, [engine, stopWebSpeech, stopMobileRecording]);
 
   return {
+    ...state,
     start,
     stop,
-    transcript,
-    interimTranscript,
-    isListening,
-    isTranscribing,
-    transcribeProgress,
-    error,
-    isMobileMode: !webSpeechSupported(),
+    setSpeechLang,
   };
 }
