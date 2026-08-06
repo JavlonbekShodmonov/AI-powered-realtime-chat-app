@@ -3,11 +3,20 @@ const nextConfig = {
   experimental: {
     serverComponentsExternalPackages: ["@xenova/transformers"],
   },
+};
+
+const BACKEND_URL = process.env.NODE_ENV === 'development' 
+  ? 'http://localhost:3001' 
+  : 'https://summeet-live.onrender.com';
+
+const nextConfig = {
+  ...nextConfig,
+
   async rewrites() {
     return [
       {
         source: "/api/history/:path*",
-        destination: `${"http://localhost:3001"}/api/history/:path*`,
+        destination: `${BACKEND_URL}/api/history/:path*`,
       },
     ];
   },
