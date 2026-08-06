@@ -1,0 +1,63 @@
+services:
+  # 1. Central MongoDB Database
+  mongodb:
+    image: mongo:latest
+    container_name: summeet-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - summeet-network
+
+  # 2. Redis Message Broker for BullMQ Queues
+  redis:
+    image: redis:alpine
+    container_name: summeet-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - summeet-network
+
+  # 3. NestJS API Gateway
+  api-gateway:
+    build:
+      context: .
+      dockerfile: ./apps/api-gateway/Dockerfile
+    container_name: summeet-gateway
+    ports:
+      - "3002:3001"
+    environment:
+      - PORT=3001
+      - MONGODB_URI=mongodb://mongodb:27017/summeet
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - summeet-network
+
+  # 4. Background AI Worker
+  ai-service:
+    build:
+      context: .
+      dockerfile: ./apps/ai-service/Dockerfile
+    container_name: summeet-ai-worker
+    environment:
+      - MONGODB_URI=mongodb://mongodb:27017/summeet
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - GEMINI_KEY=${GEMINI_KEY}
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - summeet-network
+
+volumes:
+  mongo_data:
+
+networks:
+  summeet-network:
+    driver: bridge
