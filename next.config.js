@@ -1,16 +1,12 @@
 /** @type {import('next').NextConfig} */
-const nextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ["@xenova/transformers"],
-  },
-};
-
 const BACKEND_URL = process.env.NODE_ENV === 'development' 
   ? 'http://localhost:3001' 
   : 'https://summeet-live.onrender.com';
 
 const nextConfig = {
-  ...nextConfig,
+  experimental: {
+    serverComponentsExternalPackages: ["@xenova/transformers"],
+  },
 
   async rewrites() {
     return [
