@@ -24,7 +24,10 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         if (!res.ok) throw new Error("Failed to fetch socket auth token");
         
         const { token } = await res.json();
-        const socketUrl = process.env.NEXT_PUBLIC_REALTIME_SERVICE_URL || "http://localhost:3002";
+        const socketUrl =
+          process.env.NEXT_PUBLIC_REALTIME_SERVICE_URL ||
+          process.env.NEXT_PUBLIC_SOCKET_SERVER_URL ||
+          "https://summeet-live.onrender.com";
         
         console.log("🔌 Connecting to socket server at:", socketUrl);
 

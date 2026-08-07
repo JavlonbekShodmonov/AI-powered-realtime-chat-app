@@ -28,7 +28,10 @@ class SocketManager {
   connect(
     userId: string,
     username: string,
-    serverUrl: string = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:3002"
+    serverUrl: string =
+      process.env.NEXT_PUBLIC_REALTIME_SERVICE_URL ||
+      process.env.NEXT_PUBLIC_SOCKET_SERVER_URL ||
+      "https://summeet-live.onrender.com"
   ): Socket {
     if (this.socket?.connected && this.currentUserId === userId) {
       console.log("⚠️ Socket already connected for user:", userId);

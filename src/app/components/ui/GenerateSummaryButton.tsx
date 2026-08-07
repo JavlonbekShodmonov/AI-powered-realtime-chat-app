@@ -17,7 +17,9 @@ export function GenerateSummaryButton({ roomId, userId, isPaid, locale = "en" }:
     setLoading(true);
     setError(null);
     try {
-      const baseUrl = process.env.NEXT_PUBLIC_AI_SERVICE_URL || "http://localhost:3003";
+      const baseUrl =
+        process.env.NEXT_PUBLIC_AI_SERVICE_URL ||
+        "https://summeet-live.onrender.com";
       const response = await fetch(`${baseUrl}/api/ai/summarize`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

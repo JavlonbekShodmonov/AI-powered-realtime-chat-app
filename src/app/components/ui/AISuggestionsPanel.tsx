@@ -58,7 +58,9 @@ export default function AISuggestionsPanel({
 
     try {
       const baseUrl =
-        process.env.NEXT_PUBLIC_AI_SERVICE_URL || "http://localhost:3003";
+        process.env.NEXT_PUBLIC_AI_SERVICE_URL ||
+        process.env.NEXT_PUBLIC_AI_SERVICE_URL ||
+        "https://summeet-live.onrender.com";
       const response = await fetch(`${baseUrl}/api/ai/suggest-response`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

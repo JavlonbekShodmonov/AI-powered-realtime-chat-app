@@ -71,7 +71,9 @@ async function saveChunk(
   text: string
 ): Promise<void> {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_AI_SERVICE_URL || "http://localhost:3003";
+    const baseUrl =
+      process.env.NEXT_PUBLIC_AI_SERVICE_URL ||
+      "https://summeet-live.onrender.com";
     await fetch(`${baseUrl}/api/ai/speech-transcripts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -94,7 +96,8 @@ async function sendToGroq(audioBlob: Blob): Promise<string> {
   const formData = new FormData();
   formData.append("audio", audioBlob, "recording.webm");
 
-  const res = await fetch(`${process.env.NEXT_PUBLIC_AI_SERVICE_URL}/api/ai/transcribe`, {
+  const baseUrl = process.env.NEXT_PUBLIC_AI_SERVICE_URL || "https://summeet-live.onrender.com";
+  const res = await fetch(`${baseUrl}/api/ai/transcribe`, {
     method: "POST",
     body: formData,
   });
