@@ -50,9 +50,10 @@ async function bootstrap() {
   );
 
   app.enableCors({
-    origin: '*',
+    origin: ['http://localhost:3000', 'https://summeet.live'],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     allowedHeaders: 'Content-Type, Accept, Authorization, x-client-device, x-anonymous-client-id, x-internal-secret',
+    credentials: true,
   });
 
   app.use(
