@@ -3,6 +3,7 @@ import * as path from 'path';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe } from '@nestjs/common';
+import { createProxyMiddleware } from 'http-proxy-middleware';
 
 function loadEnvFile() {
   const candidates = [
@@ -37,9 +38,6 @@ const { AppModule } = require('./app.module');
 async function bootstrap() {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // Trusts the first proxy hop's X-Forwarded-For header for request.ip.
-  // Safe to leave on even if you're not behind a proxy yet — it only takes
-  // effect when the header is actually present.
   app.set('trust proxy', 1);
 
   app.useGlobalPipes(
@@ -56,6 +54,23 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE',
     allowedHeaders: 'Content-Type, Accept, Authorization, x-client-device, x-anonymous-client-id, x-internal-secret',
   });
+
+  app.use(
+    '/api/ai',
+    createProxyMiddleware({
+      target: 'http://localhost:3003',
+      changeOrigin: true,
+    }),
+  );
+
+  app.use(
+    '/socket.io',
+    createProxyMiddleware({
+      target: 'http://localhost:3002',
+      changeOrigin: true,
+      ws: true,
+    }),
+  );
 
   const port = Number(process.env.PORT || 3001);
   await app.listen(port);
