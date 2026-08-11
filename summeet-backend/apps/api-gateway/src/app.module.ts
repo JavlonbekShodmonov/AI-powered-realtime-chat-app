@@ -7,6 +7,7 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
 import { PaymentsModule } from './payments/payments.module';
 import { HistoryModule } from 'apps/api-gateway/src/history/history.module';
 import {MongooseModule} from "@nestjs/mongoose";
+import { HealthController } from './health/health.controller';
 // NotificationModule / NotificationGateway / NotificationProcessor were
 // removed from here. api-gateway should only ever produce jobs, never
 // consume 'notification-queue' — realtime-service already owns that
@@ -34,7 +35,7 @@ import {MongooseModule} from "@nestjs/mongoose";
     PaymentsModule,
     HistoryModule,
   ],
-  controllers: [AppController],
+  controllers: [AppController, HealthController],
   providers: [FreeTierGuard],
 })
 export class AppModule {}
