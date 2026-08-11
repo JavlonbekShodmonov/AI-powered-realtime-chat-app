@@ -64,6 +64,7 @@ async function bootstrap() {
     createProxyMiddleware({
       target: "http://localhost:3003",
       changeOrigin: true,
+      pathRewrite: (path, req) => "/api/ai" + path,
     }),
   );
 
