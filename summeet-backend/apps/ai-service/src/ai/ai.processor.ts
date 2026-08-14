@@ -13,7 +13,11 @@ import { SpeechTranscriptsService } from "./speech-transcripts.service";
 // without it, a burst of jobs will fire unlimited concurrent Gemini calls.
 // If you already tune concurrency elsewhere (e.g. in the BullMQ Worker
 // options at bootstrap), keep them in sync rather than setting it in two places.
-@Processor("ai-tasks", { concurrency: 5 })
+@Processor("ai-tasks", {
+  concurrency: 5,
+  drainDelay: 300,
+  stalledInterval: 120000,
+})
 export class AIProcessor extends WorkerHost {
   private mongoClient: MongoClient;
   private db: Db;
